@@ -47,6 +47,20 @@ class GeiterStoreTests(unittest.TestCase):
         self.assertEqual(result["comparison"]["status"], "no_baseline")
         self.assertIn("Save a baseline", result["learning"]["data"]["next_prompt"])
 
+    def test_iteration_claims_highest_priority_action_and_leaves_resolution_open(self):
+        self.store.init()
+        normal = self.store.propose_action("review", "Review evidence")
+        critical = self.store.propose_action("repair", "Repair workspace", priority="critical")
+        result = self.store.iterate()
+        self.assertEqual(result["active_action"]["id"], critical["id"])
+        self.assertEqual(result["active_action"]["data"]["status"], "in_progress")
+        self.assertEqual(result["hypothesis"]["data"]["text"], "Advance queued action "
+                         f"{critical['id']}: Repair workspace")
+        self.assertEqual(result["action"]["data"]["active_action_id"], critical["id"])
+        self.assertEqual([item["id"] for item in self.store.list_actions()], [normal["id"]])
+        resolved = self.store.skip_action(critical["id"], {"reason": "superseded"})
+        self.assertEqual(resolved["data"]["status"], "skipped")
+
     def test_inspect_ignores_geiter_state(self):
         self.store.init()
         Path(self.tempdir.name, "notes.md").write_text("hello", encoding="utf-8")
@@ -385,6 +399,11 @@ class GeiterStoreTests(unittest.TestCase):
         self.assertEqual(report["open_actions"][0]["id"], action["id"])
         capabilities = self.store.capabilities()
         self.assertEqual(capabilities["action_queue"]["record_kind"], "agent.action")
+        self.store.claim_action(action["id"], "itr_test")
+        active_report = self.store.report()
+        self.assertEqual(active_report["open_action_count"], 0)
+        self.assertEqual(active_report["in_progress_action_count"], 1)
+        self.assertEqual(active_report["in_progress_actions"][0]["id"], action["id"])
 
     def test_gateway_manages_persisted_actions(self):
         self.store.init()
@@ -404,6 +423,12 @@ class GeiterStoreTests(unittest.TestCase):
         self.assertEqual(
             completed["result"]["content"][0]["json"]["data"]["status"], "completed"
         )
+        listed = dispatch(self.store, {
+            "jsonrpc": "2.0", "id": 22, "method": "tools/list",
+        })
+        names = {tool["name"] for tool in listed["result"]["content"][0]["json"]["tools"]}
+        self.assertIn("geiter_capabilities", names)
+        self.assertIn("geiter_skip_action", names)
 
     def test_gateway_exposes_resources(self):
         self.store.init()

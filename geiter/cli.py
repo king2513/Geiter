@@ -86,9 +86,9 @@ def parser() -> argparse.ArgumentParser:
     connect.add_argument("--format", choices=("generic", "claude", "cursor", "vscode"), default="generic")
     connect.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
     action = commands.add_parser("action", help="Manage persisted agent actions")
-    action.add_argument("operation", choices=("list", "complete"))
+    action.add_argument("operation", choices=("list", "complete", "skip"))
     action.add_argument("action_id", nargs="?")
-    action.add_argument("--status", default="open")
+    action.add_argument("--status", choices=("open", "in_progress", "completed", "skipped", "all"), default="open")
     action.add_argument("--evidence")
     action.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
 
@@ -145,6 +145,7 @@ def main(argv: list[str] | None = None) -> None:
                 "runs",
             )},
             "open_action_count": len(store.list_actions()),
+            "in_progress_action_count": len(store.list_actions("in_progress")),
         }
     elif args.command == "inspect":
         result = store.inspect()
@@ -228,12 +229,16 @@ def main(argv: list[str] | None = None) -> None:
             result = {"servers": {"geiter": {"type": "stdio", "command": base["command"], "args": base["args"]}}}
     elif args.command == "action":
         if args.operation == "list":
-            result = store.list_actions(args.status)
+            result = store.list_actions(None if args.status == "all" else args.status)
         else:
             if not args.action_id:
-                raise SystemExit("action complete requires action_id")
+                raise SystemExit(f"action {args.operation} requires action_id")
             evidence = {"text": args.evidence} if args.evidence else None
-            result = store.complete_action(args.action_id, evidence)
+            result = (
+                store.complete_action(args.action_id, evidence)
+                if args.operation == "complete"
+                else store.skip_action(args.action_id, evidence)
+            )
     elif args.command == "iterate":
         result = store.iterate(args.hypothesis)
     elif args.command == "goal":

@@ -26,8 +26,9 @@ experiment propose --hypothesis <text> --change <text> [--risk <level>] --json
 experiment approve --id <experiment-id> --json
 experiment result --id <experiment-id> --outcome <supported|rejected|inconclusive> --evidence <text> --json
 iterate [--hypothesis <text>] --json
-action list [--status <open|completed>] --json
+action list [--status <open|in_progress|completed|skipped|all>] --json
 action complete <action-id> [--evidence <text>] --json
+action skip <action-id> [--evidence <text>] --json
 iterate [--hypothesis <text>] --json
 event list --json
 ```
@@ -47,9 +48,13 @@ capability document, including version, schemas, transport, and entrypoints.
 `geiter_regression` runs the configured prompts against a provider and returns
 a `geiter/gate-v1` payload containing an `ok` boolean, named checks, failed
 check names, and a typed next-step `action`.
-The gate action is also persisted as an `agent.action` record. `geiter_actions`
-lists queued actions by priority; `geiter_complete_action` completes one with
-optional evidence. Open actions with the same dedupe key are idempotent.
+The gate action is also persisted as an `agent.action` record. `iterate`
+claims the highest-priority open action and records it in the iteration trace;
+claiming does not imply that external work was completed.
+`geiter_actions` lists queued actions by priority; `geiter_complete_action`
+or `geiter_skip_action` resolves one with optional evidence. Open actions with
+the same dedupe key are idempotent. Status and report payloads expose both
+`open_action_count` and `in_progress_action_count`.
 It also exposes `geiter://status` and `geiter://report` resources through
 `resources/list` and `resources/read`.
 
@@ -111,7 +116,7 @@ local record and refuses experiments marked with external side effects.
 An approved experiment can be completed with a structured result, which writes
 an `experiment.result` learning containing the selected comparison and evidence.
 `iterate` includes the latest comparison context, pending approved experiments,
-and a next prompt chosen from those signals.
+the claimed action (when present), and a next prompt chosen from those signals.
 `matrix` groups observations by provider and prompt intent, then returns the
 weakest cells an agent should improve first.
 

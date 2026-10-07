@@ -58,6 +58,8 @@ python -m geiter experiment propose --hypothesis "Improve citation rate" --chang
 python -m geiter experiment result --id <experiment-id> --outcome supported --evidence "Citation rate improved" --json
 python -m geiter iterate --json
 python -m geiter action list --json
+python -m geiter action complete <action-id> --evidence "Verified the repair" --json
+python -m geiter action skip <action-id> --evidence "Superseded by a newer experiment" --json
 ```
 
 Replay a deterministic provider batch:
@@ -147,9 +149,12 @@ as a single pass/fail contract without interpreting prose.
 the version, state and report schemas, transport, entrypoints, and operating
 principles without changing workspace state.
 
-Regression gate actions are persisted in the workspace. Agents can inspect
-them by priority with `action list`, then complete them with evidence using
-`action complete <action-id> --evidence <text>`.
+Regression gate actions are persisted in the workspace. `iterate` claims the
+highest-priority open action without pretending to execute external work.
+Agents can inspect them by priority with `action list`, then complete or skip
+them with evidence using `action complete` or `action skip`.
+Reports distinguish open work from in-progress work so claimed actions remain
+visible across processes.
 
 Every batch run creates a durable run ledger. Provider exceptions are recorded
 per prompt, successful observations are preserved, and the batch finishes as

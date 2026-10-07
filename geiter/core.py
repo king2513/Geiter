@@ -131,12 +131,19 @@ class GeiterStore:
         iteration_id = uid("itr")
         observation = self.inspect()
         comparison = self.compare()
+        queued_actions = self.list_actions()
+        active_action = self.claim_action(queued_actions[0]["id"], iteration_id) if queued_actions else None
         pending_experiments = [
             item for item in state.get("experiments", [])
             if item["data"].get("status") == "approved"
         ]
         if not hypothesis:
-            if pending_experiments:
+            if active_action:
+                hypothesis = (
+                    f"Advance queued action {active_action['id']}: "
+                    f"{active_action['data']['prompt']}"
+                )
+            elif pending_experiments:
                 hypothesis = (
                     f"Complete approved experiment {pending_experiments[-1]['id']} "
                     "and record evidence before proposing another change."
@@ -162,6 +169,9 @@ class GeiterStore:
                 "comparison_status": comparison.get("status"),
                 "comparison_verdict": comparison.get("verdict"),
                 "pending_experiment_ids": [item["id"] for item in pending_experiments],
+                "active_action_id": active_action["id"] if active_action else None,
+                "active_action_status": active_action["data"]["status"] if active_action else None,
+                "decision": "claimed" if active_action else "no_queued_action",
             },
         )
         measurement = self.add(
@@ -180,7 +190,7 @@ class GeiterStore:
             {
                 "iteration_id": iteration_id,
                 "text": "The loop is useful when each decision leaves typed evidence behind.",
-                "next_prompt": self._next_prompt(comparison, pending_experiments),
+                "next_prompt": self._next_prompt(comparison, pending_experiments, active_action),
             },
         )
         result = {
@@ -189,6 +199,7 @@ class GeiterStore:
             "observation": observation,
             "hypothesis": hypothesis_record,
             "action": action,
+            "active_action": active_action,
             "comparison": comparison,
             "measurement": measurement,
             "learning": learning,
@@ -200,7 +211,13 @@ class GeiterStore:
         return result
 
     @staticmethod
-    def _next_prompt(comparison: dict[str, Any], pending_experiments: list[dict[str, Any]]) -> str:
+    def _next_prompt(
+        comparison: dict[str, Any],
+        pending_experiments: list[dict[str, Any]],
+        active_action: dict[str, Any] | None = None,
+    ) -> str:
+        if active_action:
+            return active_action["data"]["prompt"]
         if pending_experiments:
             return "Collect post-change observations and record the approved experiment result."
         if comparison.get("status") == "no_baseline":
@@ -340,7 +357,7 @@ class GeiterStore:
         """Return a stable machine-readable description of Geiter's contract."""
         return {
             "schema": "geiter/capabilities-v1",
-            "version": "1.12.1",
+            "version": "1.13.0",
             "identity": self.read()["identity"],
             "state_schema": "geiter/v1",
             "report_schemas": [
@@ -366,8 +383,10 @@ class GeiterStore:
             },
             "action_queue": {
                 "record_kind": "agent.action",
-                "statuses": ["open", "completed"],
+                "statuses": ["open", "in_progress", "completed", "skipped"],
                 "ordering": "priority_then_created_at",
+                "resolution_outcomes": ["completed", "skipped"],
+                "active_status": "in_progress",
             },
             "principles": [
                 "evidence-first",
@@ -426,20 +445,51 @@ class GeiterStore:
         rank = {"critical": 0, "high": 1, "normal": 2}
         return sorted(actions, key=lambda item: (rank.get(item["data"].get("priority"), 9), item["created_at"]))
 
-    def complete_action(self, action_id: str, evidence: dict[str, Any] | None = None) -> dict[str, Any]:
+    def claim_action(self, action_id: str, iteration_id: str) -> dict[str, Any]:
         state = self.read()
         action = next((item for item in state.get("actions", []) if item["id"] == action_id), None)
         if action is None or action.get("kind") != "agent.action":
             raise ValueError(f"unknown action id: {action_id}")
-        if action["data"].get("status") == "completed":
-            return action
-        action["data"]["status"] = "completed"
-        action["data"]["completed_at"] = now()
-        if evidence:
-            action["data"]["completion_evidence"] = evidence
-        self._write(state)
-        self.event("actions.completed", action)
+        status = action["data"].get("status")
+        if status == "open":
+            action["data"]["status"] = "in_progress"
+            action["data"]["claimed_at"] = now()
+            action["data"]["claimed_by"] = iteration_id
+            self._write(state)
+            self.event("actions.claimed", action)
+        elif status not in {"in_progress", "completed", "skipped"}:
+            raise ValueError(f"invalid action status: {status}")
         return action
+
+    def resolve_action(
+        self,
+        action_id: str,
+        outcome: str,
+        evidence: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        state = self.read()
+        action = next((item for item in state.get("actions", []) if item["id"] == action_id), None)
+        if action is None or action.get("kind") != "agent.action":
+            raise ValueError(f"unknown action id: {action_id}")
+        if outcome not in {"completed", "skipped"}:
+            raise ValueError(f"unsupported action outcome: {outcome}")
+        if action["data"].get("status") in {"completed", "skipped"}:
+            return action
+        action["data"]["status"] = outcome
+        action["data"]["resolved_at"] = now()
+        action["data"]["resolution"] = outcome
+        if evidence:
+            action["data"]["resolution_evidence"] = evidence
+            action["data"]["completion_evidence" if outcome == "completed" else "skip_evidence"] = evidence
+        self._write(state)
+        self.event(f"actions.{outcome}", action)
+        return action
+
+    def complete_action(self, action_id: str, evidence: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.resolve_action(action_id, "completed", evidence)
+
+    def skip_action(self, action_id: str, evidence: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.resolve_action(action_id, "skipped", evidence)
 
     def regression_gate(self, run: dict[str, Any]) -> dict[str, Any]:
         """Evaluate a provider run and workspace health as one machine gate."""
@@ -970,6 +1020,8 @@ class GeiterStore:
             "runs": state.get("runs", [])[-10:],
             "open_action_count": len(self.list_actions()),
             "open_actions": self.list_actions()[:20],
+            "in_progress_action_count": len(self.list_actions("in_progress")),
+            "in_progress_actions": self.list_actions("in_progress")[:20],
             "experiments": state.get("experiments", []),
             "latest_learnings": state.get("learnings", [])[-10:],
         }

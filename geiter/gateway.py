@@ -60,6 +60,11 @@ TOOLS = [
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
+        "name": "geiter_capabilities",
+        "description": "Read the stable version, schema, transport, and entrypoint contract.",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
         "name": "geiter_actions",
         "description": "List persisted agent actions ordered by priority.",
         "inputSchema": {
@@ -70,6 +75,18 @@ TOOLS = [
     {
         "name": "geiter_complete_action",
         "description": "Mark a persisted agent action complete with optional evidence.",
+        "inputSchema": {
+            "type": "object",
+            "required": ["action_id"],
+            "properties": {
+                "action_id": {"type": "string"},
+                "evidence": {"type": "object"},
+            },
+        },
+    },
+    {
+        "name": "geiter_skip_action",
+        "description": "Skip a persisted agent action with optional evidence.",
         "inputSchema": {
             "type": "object",
             "required": ["action_id"],
@@ -211,7 +228,7 @@ def dispatch(store: GeiterStore, request: dict[str, Any]) -> dict[str, Any] | No
     if method == "initialize":
         return _result(request_id, {
             "protocolVersion": "2025-06-18",
-            "serverInfo": {"name": "geiter", "version": "1.12.1"},
+            "serverInfo": {"name": "geiter", "version": "1.13.0"},
             "capabilities": {"tools": {}, "resources": {}},
         })
     if method == "notifications/initialized":
@@ -234,6 +251,7 @@ def dispatch(store: GeiterStore, request: dict[str, Any]) -> dict[str, Any] | No
                 "baselines", "experiments",
                 )},
                 "open_action_count": len(store.list_actions()),
+                "in_progress_action_count": len(store.list_actions("in_progress")),
             }
         elif uri == "geiter://report":
             value = store.report()
@@ -259,6 +277,7 @@ def dispatch(store: GeiterStore, request: dict[str, Any]) -> dict[str, Any] | No
                     "actions", "measurements", "learnings", "iterations",
                 )},
                 "open_action_count": len(store.list_actions()),
+                "in_progress_action_count": len(store.list_actions("in_progress")),
             }
         elif name == "geiter_capabilities":
             value = store.capabilities()
@@ -279,6 +298,8 @@ def dispatch(store: GeiterStore, request: dict[str, Any]) -> dict[str, Any] | No
             value = store.list_actions(args.get("status", "open"))
         elif name == "geiter_complete_action":
             value = store.complete_action(args["action_id"], args.get("evidence"))
+        elif name == "geiter_skip_action":
+            value = store.skip_action(args["action_id"], args.get("evidence"))
         elif name == "geiter_connect":
             connection = store.connection_config()
             output_format = args.get("format", "generic")

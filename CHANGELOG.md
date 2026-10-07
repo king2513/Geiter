@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.13.0 - 2026-10-07
+
+- made `iterate` claim the highest-priority open agent action
+- added explicit completed/skipped action resolution with evidence
+- exposed action skip and capability discovery through the gateway contract
+
 ## 1.12.1 - 2026-10-08
 
 - surfaced open action counts and prioritized action records in status and reports
