@@ -138,7 +138,8 @@ The built-in JSONL adapter is replay-only and has no network access, which keeps
 
 `regression` runs a fixture against all configured prompts and returns a
 `geiter/gate-v1` object with an `ok` boolean, named checks, health diagnostics,
-and the run ID. Agents and CI can use this as a single pass/fail contract.
+the run ID, and a typed `action` for the next step. Agents and CI can use this
+as a single pass/fail contract without interpreting prose.
 
 Every batch run creates a durable run ledger. Provider exceptions are recorded
 per prompt, successful observations are preserved, and the batch finishes as

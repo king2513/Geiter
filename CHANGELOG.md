@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.9.0 - 2026-10-08
+
+- added typed next-step actions to regression gate results
+- made failed checks directly actionable for agent callers
+
 ## 1.8.1 - 2026-10-07
 
 - rejected empty regression batches instead of treating them as passing gates

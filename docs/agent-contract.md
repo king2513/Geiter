@@ -39,7 +39,8 @@ The gateway currently exposes `geiter_status`, `geiter_add_prompt`,
 `geiter_connect` returns the same configuration shape as the CLI and never
 writes client configuration files.
 `geiter_regression` runs the configured prompts against a provider and returns
-a `geiter/gate-v1` payload containing an `ok` boolean and named checks.
+a `geiter/gate-v1` payload containing an `ok` boolean, named checks, failed
+check names, and a typed next-step `action`.
 It also exposes `geiter://status` and `geiter://report` resources through
 `resources/list` and `resources/read`.
 

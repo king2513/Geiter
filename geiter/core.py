@@ -363,16 +363,49 @@ class GeiterStore:
                 "detail": doctor["next_action"],
             },
         ]
+        failed = [check for check in checks if not check["ok"]]
+        if not failed:
+            action = {
+                "type": "continue",
+                "priority": "normal",
+                "prompt": "Save the passing run as evidence, then compare the next observation batch.",
+            }
+        elif not checks[0]["ok"]:
+            action = {
+                "type": "add_prompts",
+                "priority": "high",
+                "prompt": "Add at least one deterministic retrieval prompt before running the regression gate.",
+            }
+        elif not checks[1]["ok"]:
+            action = {
+                "type": "repair_provider_run",
+                "priority": "high",
+                "prompt": "Inspect failed provider attempts, repair the adapter or fixture, then resume or rerun.",
+            }
+        elif not checks[2]["ok"]:
+            action = {
+                "type": "repair_observations",
+                "priority": "high",
+                "prompt": "Repair unusable observations before trusting GEO comparisons.",
+            }
+        else:
+            action = {
+                "type": "repair_workspace",
+                "priority": "critical",
+                "prompt": "Run doctor, repair workspace consistency failures, then rerun the regression gate.",
+            }
         return {
             "schema": "geiter/gate-v1",
-            "ok": all(check["ok"] for check in checks),
+            "ok": not failed,
             "run_id": run["id"],
             "provider": run["data"]["provider"],
             "summary": summary,
             "checks": checks,
+            "failed_checks": [check["name"] for check in failed],
+            "action": action,
             "health": health,
             "doctor": doctor,
-            "next_action": "Regression gate passed." if all(check["ok"] for check in checks)
+            "next_action": "Regression gate passed." if not failed
             else "Repair failed checks before trusting this regression run.",
         }
 

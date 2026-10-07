@@ -323,6 +323,7 @@ class GeiterStoreTests(unittest.TestCase):
         self.assertTrue(result["gate"]["ok"])
         self.assertEqual(result["gate"]["schema"], "geiter/gate-v1")
         self.assertEqual(result["gate"]["checks"][1]["name"], "run_completed")
+        self.assertEqual(result["gate"]["action"]["type"], "continue")
 
     def test_regression_gate_rejects_empty_batches(self):
         self.store.init()
@@ -330,6 +331,7 @@ class GeiterStoreTests(unittest.TestCase):
         self.assertFalse(result["gate"]["ok"])
         checks = {check["name"]: check["ok"] for check in result["gate"]["checks"]}
         self.assertFalse(checks["prompts_present"])
+        self.assertEqual(result["gate"]["action"]["type"], "add_prompts")
 
     def test_gateway_exposes_resources(self):
         self.store.init()
