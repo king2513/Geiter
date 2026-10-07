@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.11.1 - 2026-10-08
+
+- added CI smoke verification for the built wheel and installed CLI
+
 ## 1.11.0 - 2026-10-08
 
 - added the stable `geiter://capabilities` discovery resource

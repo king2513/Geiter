@@ -340,7 +340,7 @@ class GeiterStore:
         """Return a stable machine-readable description of Geiter's contract."""
         return {
             "schema": "geiter/capabilities-v1",
-            "version": "1.11.0",
+            "version": "1.11.1",
             "identity": self.read()["identity"],
             "state_schema": "geiter/v1",
             "report_schemas": [

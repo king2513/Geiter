@@ -29,3 +29,10 @@ class ProjectContractTests(unittest.TestCase):
         workflow = (self.root / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
         self.assertIn("tags:", workflow)
         self.assertIn('"v*"', workflow)
+
+    def test_ci_verifies_built_artifact(self):
+        workflow = (self.root / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        self.assertIn("pip wheel", workflow)
+        self.assertIn("pip install", workflow)
+        self.assertIn("find-links", workflow)
+        self.assertIn("import geiter", workflow)

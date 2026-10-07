@@ -23,3 +23,7 @@ jobs:
       - run: python -m geiter --help
       - run: python -m geiter prompt add "What is Geiter?" --intent discovery --json
       - run: python -m geiter regression --provider jsonl --fixture examples/answers.jsonl --json
+      - run: python -m pip wheel --no-deps --no-build-isolation . -w "$RUNNER_TEMP/geiter-wheel"
+      - run: python -m pip install --force-reinstall --no-deps --find-links "$RUNNER_TEMP/geiter-wheel" geiter
+      - run: python -c "import geiter; assert geiter.__version__"
+      - run: geiter --help
