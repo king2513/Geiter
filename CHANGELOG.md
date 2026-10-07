@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.0 - 2026-10-07
+
+- made `iterate` evidence-aware
+- linked comparison verdicts and pending experiments into actions and learnings
+- exposed self-iteration through the agent gateway
+
 ## 0.8.0 - 2026-10-07
 
 - added experiment result ledger with evidence and comparison linkage

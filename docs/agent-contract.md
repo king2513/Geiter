@@ -21,6 +21,7 @@ experiment propose --hypothesis <text> --change <text> [--risk <level>] --json
 experiment approve --id <experiment-id> --json
 experiment result --id <experiment-id> --outcome <supported|rejected|inconclusive> --evidence <text> --json
 iterate [--hypothesis <text>] --json
+iterate [--hypothesis <text>] --json
 event list --json
 ```
 
@@ -66,6 +67,8 @@ as improvement. Experiments are proposals by default; approval only changes the
 local record and refuses experiments marked with external side effects.
 An approved experiment can be completed with a structured result, which writes
 an `experiment.result` learning containing the selected comparison and evidence.
+`iterate` includes the latest comparison context, pending approved experiments,
+and a next prompt chosen from those signals.
 
 Installed provider plugins are discovered through the `geiter.providers` Python
 entry-point group. A plugin factory must return an object with:

@@ -33,6 +33,12 @@ class GeiterStoreTests(unittest.TestCase):
         self.assertEqual(len(state["learnings"]), 1)
         self.assertGreaterEqual(len(self.store.events()), 5)
 
+    def test_iteration_consumes_comparison_context(self):
+        self.store.init()
+        result = self.store.iterate()
+        self.assertEqual(result["comparison"]["status"], "no_baseline")
+        self.assertIn("Save a baseline", result["learning"]["data"]["next_prompt"])
+
     def test_inspect_ignores_geiter_state(self):
         self.store.init()
         Path(self.tempdir.name, "notes.md").write_text("hello", encoding="utf-8")
@@ -155,6 +161,7 @@ class GeiterStoreTests(unittest.TestCase):
         self.assertIn("geiter_save_baseline", names)
         self.assertIn("geiter_compare", names)
         self.assertIn("geiter_propose_experiment", names)
+        self.assertIn("geiter_iterate", names)
 
     def test_provider_plugins_are_discovered(self):
         from unittest.mock import patch

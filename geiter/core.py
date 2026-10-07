@@ -128,8 +128,20 @@ class GeiterStore:
         state = self.read()
         iteration_id = uid("itr")
         observation = self.inspect()
+        comparison = self.compare()
+        pending_experiments = [
+            item for item in state.get("experiments", [])
+            if item["data"].get("status") == "approved"
+        ]
         if not hypothesis:
-            if state.get("goals"):
+            if pending_experiments:
+                hypothesis = (
+                    f"Complete approved experiment {pending_experiments[-1]['id']} "
+                    "and record evidence before proposing another change."
+                )
+            elif comparison.get("status") == "compared" and comparison.get("verdict") == "regressed":
+                hypothesis = f"Recover from regression: {comparison['next_action']}"
+            elif state.get("goals"):
                 hypothesis = f"Progress toward: {state['goals'][-1]['data']['text']}"
             else:
                 hypothesis = "A clear machine-readable workspace state improves the next agent decision."
@@ -145,6 +157,9 @@ class GeiterStore:
                 "iteration_id": iteration_id,
                 "type": "record",
                 "description": "Persist the hypothesis and make it available to the next agent.",
+                "comparison_status": comparison.get("status"),
+                "comparison_verdict": comparison.get("verdict"),
+                "pending_experiment_ids": [item["id"] for item in pending_experiments],
             },
         )
         measurement = self.add(
@@ -163,7 +178,7 @@ class GeiterStore:
             {
                 "iteration_id": iteration_id,
                 "text": "The loop is useful when each decision leaves typed evidence behind.",
-                "next_prompt": "Use the latest observation and learning to choose the next smallest experiment.",
+                "next_prompt": self._next_prompt(comparison, pending_experiments),
             },
         )
         result = {
@@ -172,6 +187,7 @@ class GeiterStore:
             "observation": observation,
             "hypothesis": hypothesis_record,
             "action": action,
+            "comparison": comparison,
             "measurement": measurement,
             "learning": learning,
         }
@@ -180,6 +196,16 @@ class GeiterStore:
         self._write(state)
         self.event("iteration.completed", {"iteration_id": iteration_id})
         return result
+
+    @staticmethod
+    def _next_prompt(comparison: dict[str, Any], pending_experiments: list[dict[str, Any]]) -> str:
+        if pending_experiments:
+            return "Collect post-change observations and record the approved experiment result."
+        if comparison.get("status") == "no_baseline":
+            return "Save a baseline, then run the smallest reproducible observation batch."
+        if comparison.get("verdict") == "regressed":
+            return comparison.get("next_action", "Investigate the regression before expanding scope.")
+        return "Use the latest comparison to choose the smallest next experiment and save a new baseline."
 
     def events(self, limit: int = 20) -> list[dict[str, Any]]:
         if not self.events_path.exists():

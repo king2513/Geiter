@@ -90,6 +90,14 @@ TOOLS = [
             },
         },
     },
+    {
+        "name": "geiter_iterate",
+        "description": "Run one evidence-aware self-iteration cycle.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"hypothesis": {"type": "string"}},
+        },
+    },
 ]
 
 RESOURCES = [
@@ -123,7 +131,7 @@ def dispatch(store: GeiterStore, request: dict[str, Any]) -> dict[str, Any] | No
     if method == "initialize":
         return _result(request_id, {
             "protocolVersion": "2025-06-18",
-            "serverInfo": {"name": "geiter", "version": "0.8.0"},
+            "serverInfo": {"name": "geiter", "version": "0.9.0"},
             "capabilities": {"tools": {}},
         })
     if method == "notifications/initialized":
@@ -189,6 +197,8 @@ def dispatch(store: GeiterStore, request: dict[str, Any]) -> dict[str, Any] | No
             value = store.record_experiment_result(
                 args["experiment_id"], args["outcome"], args["evidence"], args.get("baseline_id")
             )
+        elif name == "geiter_iterate":
+            value = store.iterate(args.get("hypothesis"))
         else:
             return _error(request_id, -32602, f"unknown tool: {name}")
     except (KeyError, ValueError) as exc:
