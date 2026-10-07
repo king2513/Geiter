@@ -214,7 +214,15 @@ class GeiterStore:
         lines = self.events_path.read_text(encoding="utf-8").splitlines()
         return [json.loads(line) for line in lines[-limit:]]
 
-    def start_run(self, provider: str, prompt_ids: list[str], target: str | None = None) -> dict[str, Any]:
+    def start_run(
+        self,
+        provider: str,
+        prompt_ids: list[str],
+        target: str | None = None,
+        max_attempts: int = 1,
+    ) -> dict[str, Any]:
+        if max_attempts < 1:
+            raise ValueError("max_attempts must be at least 1")
         run = self.add(
             "runs",
             "provider.run",
@@ -223,6 +231,7 @@ class GeiterStore:
                 "prompt_ids": prompt_ids,
                 "target": target,
                 "status": "running",
+                "max_attempts": max_attempts,
                 "attempts": [],
             },
         )
@@ -262,17 +271,37 @@ class GeiterStore:
         expected = set(run["data"]["prompt_ids"])
         completed = {item["prompt_id"] for item in attempts if item["status"] == "succeeded"}
         failed = {item["prompt_id"] for item in attempts if item["status"] == "failed"}
+        exhausted = {
+            prompt_id for prompt_id in expected
+            if sum(item["prompt_id"] == prompt_id for item in attempts) >= run["data"]["max_attempts"]
+        }
         run["data"]["status"] = "completed" if expected <= completed else "partial"
         run["data"]["summary"] = {
             "expected": len(expected),
             "succeeded": len(completed),
             "failed": len(failed),
             "pending": len(expected - completed - failed),
+            "exhausted": len(exhausted - completed),
         }
         run["data"]["finished_at"] = now()
         self._write(state)
         self.event("runs.finished", {"run_id": run_id, "status": run["data"]["status"]})
         return run
+
+    def retryable_prompt_ids(self, run_id: str) -> list[str]:
+        state = self.read()
+        run = next((item for item in state.get("runs", []) if item["id"] == run_id), None)
+        if run is None:
+            raise ValueError(f"unknown run id: {run_id}")
+        attempts = run["data"]["attempts"]
+        prompt_ids = []
+        for prompt_id in run["data"]["prompt_ids"]:
+            history = [item for item in attempts if item["prompt_id"] == prompt_id]
+            if any(item["status"] == "succeeded" for item in history):
+                continue
+            if len(history) < run["data"]["max_attempts"]:
+                prompt_ids.append(prompt_id)
+        return prompt_ids
 
     def add_prompt(self, text: str, intent: str | None = None) -> dict[str, Any]:
         normalized = " ".join(text.split())

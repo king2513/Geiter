@@ -40,6 +40,7 @@ def parser() -> argparse.ArgumentParser:
     run.add_argument("--provider", required=True)
     run.add_argument("--fixture", help="Path to JSONL provider fixture")
     run.add_argument("--target")
+    run.add_argument("--max-attempts", type=int, default=1)
     run.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
 
     analyze = commands.add_parser("analyze", help="Analyze retrieval observations")
@@ -146,7 +147,10 @@ def main(argv: list[str] | None = None) -> None:
         if args.provider == "jsonl" and not args.fixture:
             raise SystemExit("run --provider jsonl requires --fixture")
         provider = load_provider(args.provider, path=args.fixture)
-        result = {"provider": provider.name, **run_provider(store, store.prompts(), provider, args.target)}
+        result = {
+            "provider": provider.name,
+            **run_provider(store, store.prompts(), provider, args.target, args.max_attempts),
+        }
     elif args.command == "analyze":
         result = store.analyze()
     elif args.command == "health":

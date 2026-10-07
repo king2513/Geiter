@@ -1,3 +1,3 @@
 """Geiter: a small, agent-native self-iteration runtime."""
 
-__version__ = "1.3.0"
+__version__ = "1.4.0"

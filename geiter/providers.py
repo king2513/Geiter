@@ -97,10 +97,22 @@ def observe_prompts(store, prompts: Iterable[dict], provider: Provider, target: 
     return results
 
 
-def run_provider(store, prompts: Iterable[dict], provider: Provider, target: str | None = None) -> dict:
+def run_provider(
+    store,
+    prompts: Iterable[dict],
+    provider: Provider,
+    target: str | None = None,
+    max_attempts: int = 1,
+) -> dict:
     prompt_list = list(prompts)
-    run = store.start_run(provider.name, [prompt["id"] for prompt in prompt_list], target)
-    observations = observe_prompts(store, prompt_list, provider, target, run["id"])
+    run = store.start_run(provider.name, [prompt["id"] for prompt in prompt_list], target, max_attempts)
+    observations = []
+    for attempt_number in range(max_attempts):
+        retry_ids = set(store.retryable_prompt_ids(run["id"]))
+        if not retry_ids:
+            break
+        batch = [prompt for prompt in prompt_list if prompt["id"] in retry_ids]
+        observations.extend(observe_prompts(store, batch, provider, target, run["id"]))
     return {
         "run": store.finish_run(run["id"]),
         "observations": observations,

@@ -197,9 +197,33 @@ class GeiterStoreTests(unittest.TestCase):
 
         result = run_provider(self.store, [prompt_a, prompt_b], FlakyProvider())
         self.assertEqual(result["run"]["data"]["status"], "partial")
-        self.assertEqual(result["run"]["data"]["summary"], {"expected": 2, "succeeded": 1, "failed": 1, "pending": 0})
+        self.assertEqual(
+            result["run"]["data"]["summary"],
+            {"expected": 2, "succeeded": 1, "failed": 1, "pending": 0, "exhausted": 1},
+        )
         self.assertEqual(len(result["observations"]), 1)
         self.assertIn("TimeoutError", result["run"]["data"]["attempts"][1]["error"])
+
+    def test_run_retries_only_failures_and_never_duplicates_success(self):
+        self.store.init()
+        prompt_a = self.store.add_prompt("What is Geiter?")
+        prompt_b = self.store.add_prompt("Why use Geiter?")
+        calls = []
+
+        class RecoveringProvider:
+            name = "recovering"
+
+            def answer(self, prompt):
+                calls.append(prompt)
+                if prompt == "Why use Geiter?" and calls.count(prompt) == 1:
+                    raise TimeoutError("temporary")
+                return ProviderAnswer(self.name, "Geiter is useful.", ["https://geiter.dev/docs"])
+
+        result = run_provider(self.store, [prompt_a, prompt_b], RecoveringProvider(), max_attempts=2)
+        self.assertEqual(calls, ["What is Geiter?", "Why use Geiter?", "Why use Geiter?"])
+        self.assertEqual(result["run"]["data"]["status"], "completed")
+        self.assertEqual(result["run"]["data"]["summary"]["succeeded"], 2)
+        self.assertEqual(len(self.store.read()["observations"]), 2)
 
     def test_gateway_exposes_resources(self):
         self.store.init()

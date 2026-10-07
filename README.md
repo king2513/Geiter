@@ -112,6 +112,8 @@ The built-in JSONL adapter is replay-only and has no network access, which keeps
 Every batch run creates a durable run ledger. Provider exceptions are recorded
 per prompt, successful observations are preserved, and the batch finishes as
 `completed` or `partial` instead of silently losing the failure.
+Pass `--max-attempts N` to retry only failed prompts up to `N` total attempts;
+successful prompts are never replayed.
 
 ## Design principles
 

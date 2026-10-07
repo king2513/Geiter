@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.4.0 - 2026-10-07
+
+- added bounded retries for failed provider prompts
+- ensured successful prompts are never replayed
+- added exhausted-prompt counts to run summaries
+
 ## 1.3.0 - 2026-10-07
 
 - added durable provider run ledgers

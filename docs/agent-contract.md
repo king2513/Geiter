@@ -62,6 +62,8 @@ observations remain in the audit log but are excluded from GEO aggregates.
 `run` returns a `provider.run` record with one attempt per prompt. Attempts have
 `succeeded` or `failed` status and preserve the error text. A run is
 `completed` only when every prompt succeeds; otherwise it is `partial`.
+`--max-attempts` bounds retries. `summary.exhausted` counts prompts that still
+failed after reaching that bound.
 `geiter_runs` exposes recent ledgers to agent callers.
 
 Provider adapters implement one small contract:
