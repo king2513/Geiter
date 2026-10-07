@@ -3,6 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import geiter
 from geiter.core import GeiterStore
 from geiter.gateway import dispatch
 from geiter.providers import (
@@ -222,11 +223,24 @@ class GeiterStoreTests(unittest.TestCase):
         self.assertEqual(report["schema"], "geiter/report-v1")
         self.assertEqual(report["doctor"]["ok"], True)
 
+    def test_context_is_bounded_action_oriented_and_read_only(self):
+        self.store.init()
+        action = self.store.propose_action("investigate", "Inspect citation coverage", priority="high")
+        event_count = len(self.store.events(limit=100000))
+        context = self.store.context()
+        self.assertEqual(context["schema"], "geiter/context-v1")
+        self.assertEqual(context["capabilities"]["version"], geiter.__version__)
+        self.assertEqual(context["status"]["open_action_count"], 1)
+        self.assertEqual(context["decision"]["open_actions"][0]["id"], action["id"])
+        self.assertTrue(context["decision"]["next_action"])
+        self.assertEqual(len(self.store.events(limit=100000)), event_count)
+
     def test_gateway_exposes_tools_and_calls_domain(self):
         self.store.init()
         listed = dispatch(self.store, {"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
         names = {tool["name"] for tool in listed["result"]["content"][0]["json"]["tools"]}
         self.assertIn("geiter_add_prompt", names)
+        self.assertIn("geiter_context", names)
         response = dispatch(
             self.store,
             {
@@ -254,6 +268,7 @@ class GeiterStoreTests(unittest.TestCase):
         listed = dispatch(self.store, {"jsonrpc": "2.0", "id": 17, "method": "resources/list"})
         uris = {item["uri"] for item in listed["result"]["content"][0]["json"]["resources"]}
         self.assertIn("geiter://capabilities", uris)
+        self.assertIn("geiter://context", uris)
         resource = dispatch(self.store, {
             "jsonrpc": "2.0", "id": 18, "method": "resources/read",
             "params": {"uri": "geiter://capabilities"},
@@ -267,6 +282,22 @@ class GeiterStoreTests(unittest.TestCase):
         })
         self.assertEqual(resource_value, tool["result"]["content"][0]["json"])
         self.assertEqual(resource_value["schema"], "geiter/capabilities-v1")
+        context = dispatch(self.store, {
+            "jsonrpc": "2.0", "id": 28, "method": "resources/read",
+            "params": {"uri": "geiter://context"},
+        })
+        context_value = json.loads(
+            context["result"]["content"][0]["json"]["contents"][0]["text"]
+        )
+        self.assertEqual(context_value["schema"], "geiter/context-v1")
+        context_tool = dispatch(self.store, {
+            "jsonrpc": "2.0", "id": 29, "method": "tools/call",
+            "params": {"name": "geiter_context", "arguments": {}},
+        })
+        tool_value = context_tool["result"]["content"][0]["json"]
+        self.assertEqual(tool_value["schema"], "geiter/context-v1")
+        self.assertEqual(tool_value["status"], context_value["status"])
+        self.assertEqual(tool_value["decision"], context_value["decision"])
 
     def test_jsonl_provider_replays_a_batch(self):
         self.store.init()
@@ -547,7 +578,10 @@ class GeiterStoreTests(unittest.TestCase):
         self.store.init()
         listed = dispatch(self.store, {"jsonrpc": "2.0", "id": 4, "method": "resources/list"})
         uris = {item["uri"] for item in listed["result"]["content"][0]["json"]["resources"]}
-        self.assertEqual(uris, {"geiter://status", "geiter://report", "geiter://capabilities"})
+        self.assertEqual(
+            uris,
+            {"geiter://status", "geiter://context", "geiter://report", "geiter://capabilities"},
+        )
         read = dispatch(self.store, {
             "jsonrpc": "2.0", "id": 5, "method": "resources/read",
             "params": {"uri": "geiter://status"},

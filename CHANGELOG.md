@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.16.0 - 2026-10-07
+
+- added a bounded read-only agent bootstrap context
+- exposed `context` through the CLI, `geiter_context`, and `geiter://context`
+- centralized status payload generation across CLI and gateway
+
 ## 1.15.0 - 2026-10-07
 
 - exposed agent-authored action proposals through the CLI and gateway

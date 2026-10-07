@@ -22,6 +22,7 @@ Geiter is an agent-native runtime for Generative Engine Optimization (GEO). It g
 - resumable provider runs that continue from a durable run ID
 - structured attempt timing, error classes, and retryability decisions
 - stdio JSON-RPC gateway with tools and resources
+- bounded agent bootstrap context through CLI, tool, and resource surfaces
 - `doctor` consistency checks and `report` snapshots
 - replayable JSONL provider runs
 - installable provider plugins through `geiter.providers` entry points
@@ -54,6 +55,7 @@ python -m geiter health --json
 python -m geiter matrix --json
 python -m geiter doctor --json
 python -m geiter report --json
+python -m geiter context --json
 python -m geiter baseline save --label before-change --json
 python -m geiter baseline compare --json
 python -m geiter experiment propose --hypothesis "Improve citation rate" --change "Add authoritative docs" --json
@@ -120,7 +122,11 @@ printf '%s\n' \
   | python -m geiter gateway
 ```
 
-Tools include `geiter_status`, `geiter_add_prompt`, `geiter_record_observation`, `geiter_analyze`, `geiter_health`, `geiter_runs`, `geiter_report`, `geiter_resume`, `geiter_regression`, `geiter_matrix`, `geiter_save_baseline`, `geiter_compare`, `geiter_propose_experiment`, `geiter_record_experiment_result`, `geiter_iterate`, `geiter_actions`, `geiter_propose_action`, `geiter_complete_action`, `geiter_skip_action`, `geiter_reclaim_action`, `geiter_connect`, and `geiter_capabilities`. Resources include `geiter://status`, `geiter://report`, and `geiter://capabilities`.
+Tools include `geiter_status`, `geiter_context`, `geiter_add_prompt`, `geiter_record_observation`, `geiter_analyze`, `geiter_health`, `geiter_runs`, `geiter_report`, `geiter_resume`, `geiter_regression`, `geiter_matrix`, `geiter_save_baseline`, `geiter_compare`, `geiter_propose_experiment`, `geiter_record_experiment_result`, `geiter_iterate`, `geiter_actions`, `geiter_propose_action`, `geiter_complete_action`, `geiter_skip_action`, `geiter_reclaim_action`, `geiter_connect`, and `geiter_capabilities`. Resources include `geiter://status`, `geiter://context`, `geiter://report`, and `geiter://capabilities`.
+
+An agent can call `geiter_context` or read `geiter://context` once at startup
+to receive capabilities, workspace status, quality checks, queued work, and a
+bounded next-action decision without mutating state.
 
 To resume a provider run from an agent client:
 

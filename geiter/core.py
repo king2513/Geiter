@@ -375,6 +375,7 @@ class GeiterStore:
                 "geiter/comparison-v1",
                 "geiter/doctor-v1",
                 "geiter/report-v1",
+                "geiter/context-v1",
                 "geiter/gate-v1",
             ],
             "transport": {
@@ -387,6 +388,7 @@ class GeiterStore:
                 "gateway": "python -m geiter gateway",
                 "regression": "python -m geiter regression --provider jsonl --fixture <path> --json",
                 "iteration": "python -m geiter iterate --json",
+                "context": "python -m geiter context --json",
                 "actions": "python -m geiter action list --json",
                 "propose_action": "python -m geiter action propose --type <type> --prompt <text> --json",
             },
@@ -407,6 +409,56 @@ class GeiterStore:
                 "agent-first",
                 "external-effects-require-policy",
             ],
+        }
+
+    def status(self) -> dict[str, Any]:
+        state = self.read()
+        return {
+            "schema": state["schema"],
+            "identity": state["identity"],
+            "updated_at": state["updated_at"],
+            "counts": {key: len(state.get(key, [])) for key in (
+                "goals", "memories", "prompts", "observations", "hypotheses",
+                "actions", "measurements", "learnings", "iterations",
+                "baselines", "experiments", "runs",
+            )},
+            "open_action_count": len(self.list_actions()),
+            "in_progress_action_count": len(self.list_actions("in_progress")),
+            "stale_action_count": len(self.stale_actions()),
+        }
+
+    def context(self) -> dict[str, Any]:
+        """Return a bounded, read-only bootstrap packet for an agent caller."""
+        report = self.report()
+        latest_iteration = report["latest_iteration"]
+        latest_learning = report["latest_learnings"][-1] if report["latest_learnings"] else None
+        next_prompt = (
+            latest_learning.get("data", {}).get("next_prompt")
+            if latest_learning else None
+        )
+        return {
+            "schema": "geiter/context-v1",
+            "generated_at": now(),
+            "identity": report["identity"],
+            "capabilities": self.capabilities(),
+            "status": self.status(),
+            "decision": {
+                "next_action": report["analysis"].get("next_action"),
+                "next_prompt": next_prompt or report["analysis"].get("next_action"),
+                "open_actions": report["open_actions"][:10],
+                "in_progress_actions": report["in_progress_actions"][:10],
+                "stale_actions": report["stale_actions"][:10],
+                "approved_experiment_count": sum(
+                    item["data"].get("status") == "approved"
+                    for item in report["experiments"]
+                ),
+            },
+            "quality": {
+                "health": report["health"],
+                "doctor": report["doctor"],
+            },
+            "latest_iteration": latest_iteration,
+            "latest_learning": latest_learning,
         }
 
     def propose_action(

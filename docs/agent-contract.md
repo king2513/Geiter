@@ -16,6 +16,7 @@ health --json
 matrix --json
 doctor --json
 report --json
+context --json
 run --provider jsonl --fixture <path> --json
 regression --provider jsonl --fixture <path> --json
 resume <run-id> --provider jsonl --fixture <path> --json
@@ -46,6 +47,10 @@ baselines, experiments, iteration, regression, and resumable provider runs.
 `geiter_skip_action`, and `geiter_reclaim_action`.
 `geiter_connect` returns the same configuration shape as the CLI and never
 writes client configuration files.
+`geiter_context` and `geiter://context` expose the same bounded, read-only
+bootstrap packet through a tool and resource. It contains capabilities, status,
+quality checks, queued actions, and the next-action decision; it does not append
+events or mutate workspace state.
 `geiter_capabilities` and `geiter://capabilities` expose the same stable
 capability document, including version, schemas, transport, and entrypoints.
 `geiter_regression` runs the configured prompts against a provider and returns

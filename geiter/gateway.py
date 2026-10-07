@@ -22,6 +22,11 @@ TOOLS = [
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
+        "name": "geiter_context",
+        "description": "Read a bounded, read-only bootstrap context for the next agent decision.",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
         "name": "geiter_add_prompt",
         "description": "Add or reuse a deterministic retrieval prompt.",
         "inputSchema": {
@@ -231,6 +236,12 @@ RESOURCES = [
         "mimeType": "application/json",
     },
     {
+        "uri": "geiter://context",
+        "name": "Geiter agent context",
+        "description": "Bounded capabilities, status, quality, and next-action context.",
+        "mimeType": "application/json",
+    },
+    {
         "uri": "geiter://report",
         "name": "Geiter report",
         "description": "Current GEO analysis, health checks, and latest iteration.",
@@ -274,20 +285,9 @@ def dispatch(store: GeiterStore, request: dict[str, Any]) -> dict[str, Any] | No
     if method == "resources/read":
         uri = params.get("uri")
         if uri == "geiter://status":
-            state = store.read()
-            value = {
-                "schema": state["schema"],
-                "identity": state["identity"],
-                "updated_at": state["updated_at"],
-                "counts": {key: len(state.get(key, [])) for key in (
-                    "goals", "memories", "prompts", "observations", "hypotheses",
-                "actions", "measurements", "learnings", "iterations",
-                "baselines", "experiments",
-                )},
-                "open_action_count": len(store.list_actions()),
-                "in_progress_action_count": len(store.list_actions("in_progress")),
-                "stale_action_count": len(store.stale_actions()),
-            }
+            value = store.status()
+        elif uri == "geiter://context":
+            value = store.context()
         elif uri == "geiter://report":
             value = store.report()
         elif uri == "geiter://capabilities":
@@ -302,19 +302,9 @@ def dispatch(store: GeiterStore, request: dict[str, Any]) -> dict[str, Any] | No
     args = params.get("arguments") or {}
     try:
         if name == "geiter_status":
-            state = store.read()
-            value = {
-                "schema": state["schema"],
-                "identity": state["identity"],
-                "updated_at": state["updated_at"],
-                "counts": {key: len(state.get(key, [])) for key in (
-                    "goals", "memories", "prompts", "observations", "hypotheses",
-                    "actions", "measurements", "learnings", "iterations",
-                )},
-                "open_action_count": len(store.list_actions()),
-                "in_progress_action_count": len(store.list_actions("in_progress")),
-                "stale_action_count": len(store.stale_actions()),
-            }
+            value = store.status()
+        elif name == "geiter_context":
+            value = store.context()
         elif name == "geiter_capabilities":
             value = store.capabilities()
         elif name == "geiter_add_prompt":

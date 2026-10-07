@@ -19,6 +19,7 @@ def parser() -> argparse.ArgumentParser:
         ("init", "Initialize a Geiter workspace"),
         ("status", "Show workspace status"),
         ("inspect", "Record a workspace observation"),
+        ("context", "Emit a bounded agent bootstrap context"),
     ):
         command = commands.add_parser(name, help=help_text)
         command.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
@@ -139,22 +140,11 @@ def main(argv: list[str] | None = None) -> None:
     if args.command == "init":
         result = store.init()
     elif args.command == "status":
-        state = store.read()
-        result = {
-            "schema": state["schema"],
-            "identity": state["identity"],
-            "updated_at": state["updated_at"],
-            "counts": {key: len(state.get(key, [])) for key in (
-                "goals", "memories", "prompts", "observations", "hypotheses",
-            "actions", "measurements", "learnings", "iterations", "baselines", "experiments",
-                "runs",
-            )},
-            "open_action_count": len(store.list_actions()),
-            "in_progress_action_count": len(store.list_actions("in_progress")),
-            "stale_action_count": len(store.stale_actions()),
-        }
+        result = store.status()
     elif args.command == "inspect":
         result = store.inspect()
+    elif args.command == "context":
+        result = store.context()
     elif args.command == "prompt":
         if args.action == "add":
             if not args.text:
