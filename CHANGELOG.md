@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.0 - 2026-10-07
+
+- added observation quality metadata and provider health report
+- filtered empty, invalid-citation, and duplicate observations from aggregates
+- exposed quality health through CLI, agent gateway, and report output
+
 ## 1.1.0 - 2026-10-07
 
 - added citation reciprocal-rank metrics with consistent improvement direction

@@ -247,6 +247,19 @@ class GeiterStore:
             raise ValueError(f"unknown prompt id: {prompt_id}")
         clean_citations = list(dict.fromkeys(citations or []))
         normalized_answer = answer.strip()
+        invalid_citations = [citation for citation in clean_citations if not urlparse(citation).scheme]
+        quality = {
+            "answer_present": bool(normalized_answer),
+            "citations_valid": not invalid_citations,
+            "duplicate": any(
+                item["data"].get("prompt_id") == prompt_id
+                and item["data"].get("provider") == provider
+                and item["data"].get("answer_sha256") == hashlib.sha256(normalized_answer.encode("utf-8")).hexdigest()
+                for item in state.get("observations", [])
+                if item.get("kind") == "retrieval.observation"
+            ),
+        }
+        quality["usable"] = quality["answer_present"] and quality["citations_valid"] and not quality["duplicate"]
         target_text = (target or state["identity"]["name"]).casefold()
         mention = target_text in normalized_answer.casefold()
         target_tokens = [token for token in target_text.replace("-", " ").split() if token]
@@ -283,6 +296,7 @@ class GeiterStore:
                 "answer": normalized_answer,
                 "answer_sha256": hashlib.sha256(normalized_answer.encode("utf-8")).hexdigest(),
                 "citations": clean_citations,
+                "quality": quality,
                 "target": target or state["identity"]["name"],
                 "metrics": {
                     "mention": int(mention),
@@ -309,9 +323,34 @@ class GeiterStore:
         state = self.read()
         observations = [
             item for item in state["observations"]
-            if item["kind"] == "retrieval.observation"
+            if item["kind"] == "retrieval.observation" and item["data"].get("quality", {}).get("usable", True)
         ]
         return self._analyze_observations(state, observations)
+
+    def health(self) -> dict[str, Any]:
+        state = self.read()
+        observations = [item for item in state.get("observations", []) if item["kind"] == "retrieval.observation"]
+        providers: dict[str, dict[str, Any]] = {}
+        for item in observations:
+            provider = item["data"]["provider"]
+            bucket = providers.setdefault(provider, {"provider": provider, "observations": 0, "usable": 0, "duplicates": 0, "invalid": 0})
+            bucket["observations"] += 1
+            quality = item["data"].get("quality", {})
+            bucket["usable"] += int(quality.get("usable", True))
+            bucket["duplicates"] += int(quality.get("duplicate", False))
+            bucket["invalid"] += int(not quality.get("citations_valid", True) or not quality.get("answer_present", True))
+        for bucket in providers.values():
+            bucket["usable_rate"] = round(bucket["usable"] / bucket["observations"], 4) if bucket["observations"] else 0.0
+        unusable = sum(item["observations"] - item["usable"] for item in providers.values())
+        return {
+            "schema": "geiter/health-v1",
+            "generated_at": now(),
+            "observation_count": len(observations),
+            "usable_count": sum(item["usable"] for item in providers.values()),
+            "unusable_count": unusable,
+            "providers": sorted(providers.values(), key=lambda item: item["provider"]),
+            "next_action": "Repair unusable provider observations before trusting GEO comparisons." if unusable else "Observation quality is healthy.",
+        }
 
     def analyze_matrix(self) -> dict[str, Any]:
         state = self.read()
@@ -601,6 +640,7 @@ class GeiterStore:
             "memory_count": len(state["memories"]),
             "analysis": analysis,
             "matrix": self.analyze_matrix(),
+            "health": self.health(),
             "doctor": doctor,
             "latest_iteration": state["iterations"][-1] if state["iterations"] else None,
             "event_count": len(self.events(limit=100000)),

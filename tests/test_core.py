@@ -113,6 +113,20 @@ class GeiterStoreTests(unittest.TestCase):
         self.assertEqual(analysis["metrics"]["target_citation_rate"], 0.0)
         self.assertEqual(analysis["metrics"]["mean_citation_reciprocal_rank"], 0.0)
 
+    def test_health_flags_duplicate_empty_and_invalid_observations(self):
+        self.store.init()
+        prompt = self.store.add_prompt("What is Geiter?")
+        first = self.store.record_observation(prompt["id"], "provider-a", "Geiter", ["https://geiter.dev/docs"])
+        duplicate = self.store.record_observation(prompt["id"], "provider-a", "Geiter", ["https://geiter.dev/docs"])
+        empty = self.store.record_observation(prompt["id"], "provider-b", "", ["not-a-url"])
+        self.assertTrue(first["data"]["quality"]["usable"])
+        self.assertFalse(duplicate["data"]["quality"]["usable"])
+        self.assertFalse(empty["data"]["quality"]["usable"])
+        health = self.store.health()
+        self.assertEqual(health["observation_count"], 3)
+        self.assertEqual(health["unusable_count"], 2)
+        self.assertEqual(self.store.analyze()["metrics"]["sample_size"], 1)
+
     def test_comparison_requires_paired_sample_and_uses_directional_rank(self):
         self.store.init()
         prompt_a = self.store.add_prompt("What is Geiter?", "discovery")
@@ -187,6 +201,7 @@ class GeiterStoreTests(unittest.TestCase):
         self.assertIn("geiter_compare", names)
         self.assertIn("geiter_propose_experiment", names)
         self.assertIn("geiter_iterate", names)
+        self.assertIn("geiter_health", names)
 
     def test_provider_plugins_are_discovered(self):
         from unittest.mock import patch

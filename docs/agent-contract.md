@@ -12,6 +12,7 @@ prompt add <text> [--intent <intent>] --json
 prompt list --json
 observe <prompt-id> --provider <name> --answer <text> [--citation <url>] --json
 analyze --json
+health --json
 matrix --json
 doctor --json
 report --json
@@ -53,6 +54,10 @@ Each retrieval observation can contain:
 - `target_citation`: a citation resolves to a target token
 - `citation_position`: first target citation position, when available
 - `citation_reciprocal_rank`: direction-safe citation rank (`1 / position`)
+
+`health` reports provider-level usable rates and flags empty answers, invalid
+citation URLs, and duplicate prompt/provider/answer observations. Unusable
+observations remain in the audit log but are excluded from GEO aggregates.
 
 Provider adapters implement one small contract:
 

@@ -44,6 +44,8 @@ def parser() -> argparse.ArgumentParser:
 
     analyze = commands.add_parser("analyze", help="Analyze retrieval observations")
     analyze.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
+    health = commands.add_parser("health", help="Assess observation and provider quality")
+    health.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
     matrix = commands.add_parser("matrix", help="Analyze coverage by provider and prompt intent")
     matrix.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
     baseline = commands.add_parser("baseline", help="Manage analysis baselines")
@@ -149,6 +151,8 @@ def main(argv: list[str] | None = None) -> None:
         }
     elif args.command == "analyze":
         result = store.analyze()
+    elif args.command == "health":
+        result = store.health()
     elif args.command == "matrix":
         result = store.analyze_matrix()
     elif args.command == "baseline":

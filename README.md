@@ -17,6 +17,7 @@ Geiter is an agent-native runtime for Generative Engine Optimization (GEO). It g
 - deterministic retrieval prompts and provider observations
 - mention, citation, target-citation, and citation-position signals
 - direction-safe reciprocal-rank citation signal and paired comparisons
+- observation/provider health checks that filter unusable evidence
 - stdio JSON-RPC gateway with tools and resources
 - `doctor` consistency checks and `report` snapshots
 - replayable JSONL provider runs
@@ -37,6 +38,7 @@ python -m geiter prompt add "What is Geiter?" --intent discovery
 python -m geiter prompt list --json
 python -m geiter observe <prompt-id> --provider fixture --answer "Geiter is an agent-native GEO runtime." --citation https://example.com/geiter
 python -m geiter analyze --json
+python -m geiter health --json
 python -m geiter matrix --json
 python -m geiter doctor --json
 python -m geiter report --json
