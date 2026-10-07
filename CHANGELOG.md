@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.0 - 2026-10-07
+
+- added a stdio JSON-RPC gateway for agent and MCP-style callers
+- added `doctor` consistency checks
+- added complete machine-readable `report` snapshots
+- added protocol-level gateway tests
+
 ## 0.2.0 - 2026-10-07
 
 - added deterministic retrieval prompts

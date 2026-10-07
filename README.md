@@ -11,6 +11,8 @@ The first release is dependency-free:
 - stable JSON output for agent callers
 - deterministic retrieval prompts and provider observations
 - first GEO signals: mention rate, citation rate, citation position
+- stdio JSON-RPC gateway for agent and MCP-style callers
+- `doctor` consistency checks and `report` snapshots
 - a deterministic loop: `inspect -> hypothesize -> act -> measure -> learn`
 
 ## Quick start
@@ -26,6 +28,8 @@ python -m geiter prompt list --json
 # Use the returned prompt id:
 python -m geiter observe <prompt-id> --provider fixture --answer "Geiter is an agent-native GEO runtime." --citation https://example.com/geiter
 python -m geiter analyze --json
+python -m geiter doctor --json
+python -m geiter report --json
 python -m geiter inspect
 python -m geiter iterate --hypothesis "Expose one canonical JSON contract"
 python -m geiter status --json
@@ -76,6 +80,9 @@ Most GEO tooling optimizes pages for human readers and treats agents as an analy
 | `prompt add/list` | Manage deterministic retrieval prompts |
 | `observe` | Record a provider answer and citations |
 | `analyze` | Compute GEO signals and next action |
+| `doctor` | Validate state and event consistency |
+| `report` | Emit a complete machine-readable report |
+| `gateway` | Serve the stdio agent gateway |
 | `iterate` | Run one self-iteration cycle |
 | `event list` | Inspect the event stream |
 
@@ -84,6 +91,15 @@ Most GEO tooling optimizes pages for human readers and treats agents as an analy
 ```bash
 python -m unittest discover -s tests -v
 python -m geiter --help
+```
+
+Agent gateway smoke test:
+
+```bash
+printf '%s\n' \
+  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
+  '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
+  | python -m geiter gateway
 ```
 
 ## Roadmap

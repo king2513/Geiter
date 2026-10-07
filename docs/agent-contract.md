@@ -12,9 +12,16 @@ prompt add <text> [--intent <intent>] --json
 prompt list --json
 observe <prompt-id> --provider <name> --answer <text> [--citation <url>] --json
 analyze --json
+doctor --json
+report --json
 iterate [--hypothesis <text>] --json
 event list --json
 ```
+
+For process-based integrations, run `python -m geiter gateway` and send one
+JSON-RPC request per line over stdin. Responses are one JSON object per line.
+The gateway currently exposes `geiter_status`, `geiter_add_prompt`,
+`geiter_record_observation`, `geiter_analyze`, and `geiter_report`.
 
 ## Stability rules
 

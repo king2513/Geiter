@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 
 from geiter.core import GeiterStore
+from geiter.gateway import dispatch
 
 
 class GeiterStoreTests(unittest.TestCase):
@@ -66,3 +67,27 @@ class GeiterStoreTests(unittest.TestCase):
         self.assertEqual(analysis["metrics"]["mention_rate"], 1.0)
         self.assertEqual(analysis["metrics"]["citation_rate"], 1.0)
         self.assertEqual(analysis["metrics"]["target_citation_rate"], 0.0)
+
+    def test_doctor_and_report_are_machine_readable(self):
+        self.store.init()
+        doctor = self.store.doctor()
+        report = self.store.report()
+        self.assertTrue(doctor["ok"])
+        self.assertEqual(report["schema"], "geiter/report-v1")
+        self.assertEqual(report["doctor"]["ok"], True)
+
+    def test_gateway_exposes_tools_and_calls_domain(self):
+        self.store.init()
+        listed = dispatch(self.store, {"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+        names = {tool["name"] for tool in listed["result"]["content"][0]["json"]["tools"]}
+        self.assertIn("geiter_add_prompt", names)
+        response = dispatch(
+            self.store,
+            {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {"name": "geiter_add_prompt", "arguments": {"text": "What is Geiter?"}},
+            },
+        )
+        self.assertEqual(response["result"]["content"][0]["json"]["kind"], "prompt")

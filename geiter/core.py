@@ -316,3 +316,55 @@ class GeiterStore:
         if metrics["target_citation_rate"] == 0:
             return "Strengthen attributable, crawlable source material; mention alone is not evidence of citation."
         return "Expand prompt and provider coverage, then compare the next observation batch against this baseline."
+
+    def doctor(self) -> dict[str, Any]:
+        state = self.read()
+        checks: list[dict[str, Any]] = []
+
+        def check(name: str, ok: bool, detail: str) -> None:
+            checks.append({"name": name, "ok": ok, "detail": detail})
+
+        check("schema", state.get("schema") == "geiter/v1", str(state.get("schema")))
+        required = {
+            "identity", "goals", "memories", "prompts", "observations",
+            "hypotheses", "actions", "measurements", "learnings", "iterations",
+        }
+        missing = sorted(required.difference(state))
+        check("collections", not missing, f"missing={missing}" if missing else "all required collections present")
+        check("state_file", self.state_path.exists(), str(self.state_path))
+        check("event_log", self.events_path.exists(), str(self.events_path))
+
+        invalid_refs: list[str] = []
+        prompt_ids = {item["id"] for item in state.get("prompts", [])}
+        for item in state.get("observations", []):
+            prompt_id = item.get("data", {}).get("prompt_id")
+            if item.get("kind") == "retrieval.observation" and prompt_id not in prompt_ids:
+                invalid_refs.append(f"{item.get('id')}->{prompt_id}")
+        check("references", not invalid_refs, "all observation prompt references resolve" if not invalid_refs else str(invalid_refs))
+
+        events = self.events(limit=100000)
+        check("event_log_json", len(events) >= 1, f"{len(events)} events readable")
+        failed = [item for item in checks if not item["ok"]]
+        return {
+            "schema": "geiter/doctor-v1",
+            "generated_at": now(),
+            "ok": not failed,
+            "checks": checks,
+            "next_action": "Repair failed checks before trusting autonomous iteration." if failed else "Workspace is internally consistent.",
+        }
+
+    def report(self) -> dict[str, Any]:
+        state = self.read()
+        analysis = self.analyze()
+        doctor = self.doctor()
+        return {
+            "schema": "geiter/report-v1",
+            "generated_at": now(),
+            "identity": state["identity"],
+            "goals": state["goals"],
+            "memory_count": len(state["memories"]),
+            "analysis": analysis,
+            "doctor": doctor,
+            "latest_iteration": state["iterations"][-1] if state["iterations"] else None,
+            "event_count": len(self.events(limit=100000)),
+        }

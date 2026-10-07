@@ -5,6 +5,7 @@ import json
 from typing import Any
 
 from .core import GeiterStore
+from .gateway import serve
 
 
 def parser() -> argparse.ArgumentParser:
@@ -36,6 +37,14 @@ def parser() -> argparse.ArgumentParser:
 
     analyze = commands.add_parser("analyze", help="Analyze retrieval observations")
     analyze.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
+    commands.add_parser("doctor", help="Validate workspace consistency").add_argument(
+        "--json", action="store_true", help=argparse.SUPPRESS
+    )
+    commands.add_parser("report", help="Emit a complete GEO report").add_argument(
+        "--json", action="store_true", help=argparse.SUPPRESS
+    )
+    gateway = commands.add_parser("gateway", help="Serve the stdio agent gateway")
+    gateway.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
 
     iterate = commands.add_parser("iterate", help="Run one self-iteration cycle")
     iterate.add_argument("--hypothesis")
@@ -108,6 +117,13 @@ def main(argv: list[str] | None = None) -> None:
         )
     elif args.command == "analyze":
         result = store.analyze()
+    elif args.command == "doctor":
+        result = store.doctor()
+    elif args.command == "report":
+        result = store.report()
+    elif args.command == "gateway":
+        serve(args.root)
+        return
     elif args.command == "iterate":
         result = store.iterate(args.hypothesis)
     elif args.command == "goal":
