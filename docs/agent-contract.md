@@ -14,6 +14,7 @@ observe <prompt-id> --provider <name> --answer <text> [--citation <url>] --json
 analyze --json
 doctor --json
 report --json
+run --provider jsonl --fixture <path> --json
 iterate [--hypothesis <text>] --json
 event list --json
 ```
@@ -42,6 +43,15 @@ Each retrieval observation can contain:
 - `citation`: the answer contains at least one citation
 - `target_citation`: a citation resolves to a target token
 - `citation_position`: first target citation position, when available
+
+Provider adapters implement one small contract:
+
+```text
+answer(prompt) -> { provider, answer, citations[] }
+```
+
+The built-in JSONL adapter is replay-only and has no network access. This makes
+regression runs safe to commit as fixtures and compare across Geiter versions.
 
 Use `target_citation_rate` for source attribution. `citation_rate` alone only
 means the provider returned some citation.

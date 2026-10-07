@@ -96,6 +96,9 @@ class GeiterStore:
     def list_records(self, collection: str) -> list[dict[str, Any]]:
         return self.read().get(collection, [])
 
+    def prompts(self) -> list[dict[str, Any]]:
+        return self.list_records("prompts")
+
     def inspect(self) -> dict[str, Any]:
         state = self.read()
         files = [

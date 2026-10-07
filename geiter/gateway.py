@@ -71,7 +71,7 @@ def dispatch(store: GeiterStore, request: dict[str, Any]) -> dict[str, Any] | No
     if method == "initialize":
         return _result(request_id, {
             "protocolVersion": "2025-06-18",
-            "serverInfo": {"name": "geiter", "version": "0.3.0"},
+            "serverInfo": {"name": "geiter", "version": "0.4.0"},
             "capabilities": {"tools": {}},
         })
     if method == "notifications/initialized":

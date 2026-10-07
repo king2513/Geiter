@@ -5,6 +5,7 @@ from pathlib import Path
 
 from geiter.core import GeiterStore
 from geiter.gateway import dispatch
+from geiter.providers import JsonlProvider, observe_prompts
 
 
 class GeiterStoreTests(unittest.TestCase):
@@ -91,3 +92,20 @@ class GeiterStoreTests(unittest.TestCase):
             },
         )
         self.assertEqual(response["result"]["content"][0]["json"]["kind"], "prompt")
+
+    def test_jsonl_provider_replays_a_batch(self):
+        self.store.init()
+        prompt = self.store.add_prompt("What is Geiter?")
+        fixture = Path(self.tempdir.name, "answers.jsonl")
+        fixture.write_text(
+            json.dumps({
+                "prompt": "What is Geiter?",
+                "provider": "replay",
+                "answer": "Geiter is an agent-native GEO runtime.",
+                "citations": ["https://geiter.dev/docs"],
+            }) + "\n",
+            encoding="utf-8",
+        )
+        observations = observe_prompts(self.store, [prompt], JsonlProvider(fixture))
+        self.assertEqual(len(observations), 1)
+        self.assertEqual(observations[0]["data"]["provider"], "replay")

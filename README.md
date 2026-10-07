@@ -13,6 +13,7 @@ The first release is dependency-free:
 - first GEO signals: mention rate, citation rate, citation position
 - stdio JSON-RPC gateway for agent and MCP-style callers
 - `doctor` consistency checks and `report` snapshots
+- replayable provider adapters and batch observation runs
 - a deterministic loop: `inspect -> hypothesize -> act -> measure -> learn`
 
 ## Quick start
@@ -30,6 +31,7 @@ python -m geiter observe <prompt-id> --provider fixture --answer "Geiter is an a
 python -m geiter analyze --json
 python -m geiter doctor --json
 python -m geiter report --json
+python -m geiter run --provider jsonl --fixture ./answers.jsonl --json
 python -m geiter inspect
 python -m geiter iterate --hypothesis "Expose one canonical JSON contract"
 python -m geiter status --json
@@ -83,6 +85,7 @@ Most GEO tooling optimizes pages for human readers and treats agents as an analy
 | `doctor` | Validate state and event consistency |
 | `report` | Emit a complete machine-readable report |
 | `gateway` | Serve the stdio agent gateway |
+| `run` | Replay a provider fixture across all prompts |
 | `iterate` | Run one self-iteration cycle |
 | `event list` | Inspect the event stream |
 
@@ -100,6 +103,12 @@ printf '%s\n' \
   '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
   '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
   | python -m geiter gateway
+```
+
+Provider fixtures are JSONL so runs are deterministic and reviewable:
+
+```json
+{"prompt":"What is Geiter?","provider":"replay","answer":"Geiter is an agent-native GEO runtime.","citations":["https://geiter.dev/docs"]}
 ```
 
 ## Roadmap

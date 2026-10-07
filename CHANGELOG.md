@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.0 - 2026-10-07
+
+- added provider protocol and deterministic JSONL replay adapter
+- added `run` for batch observations across all prompts
+- added provider replay contract tests
+- added write-free syntax verification for cross-platform CI
+
 ## 0.3.0 - 2026-10-07
 
 - added a stdio JSON-RPC gateway for agent and MCP-style callers

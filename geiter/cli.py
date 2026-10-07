@@ -6,6 +6,7 @@ from typing import Any
 
 from .core import GeiterStore
 from .gateway import serve
+from .providers import JsonlProvider, observe_prompts
 
 
 def parser() -> argparse.ArgumentParser:
@@ -34,6 +35,12 @@ def parser() -> argparse.ArgumentParser:
     observe.add_argument("--citation", action="append", default=[])
     observe.add_argument("--target")
     observe.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
+
+    run = commands.add_parser("run", help="Run a provider across all prompts")
+    run.add_argument("--provider", choices=("jsonl",), required=True)
+    run.add_argument("--fixture", required=True, help="Path to JSONL provider fixture")
+    run.add_argument("--target")
+    run.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
 
     analyze = commands.add_parser("analyze", help="Analyze retrieval observations")
     analyze.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
@@ -115,6 +122,12 @@ def main(argv: list[str] | None = None) -> None:
             args.citation,
             args.target,
         )
+    elif args.command == "run":
+        provider = JsonlProvider(args.fixture)
+        result = {
+            "provider": provider.name,
+            "observations": observe_prompts(store, store.prompts(), provider, args.target),
+        }
     elif args.command == "analyze":
         result = store.analyze()
     elif args.command == "doctor":

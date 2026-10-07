@@ -12,6 +12,7 @@ Geiter is built for agents first. Contributions should preserve that property:
 
 ```bash
 python -m unittest discover -s tests -v
+python tests/syntax_check.py
 python -m geiter --help
 ```
 
