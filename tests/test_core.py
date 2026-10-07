@@ -5,7 +5,7 @@ from pathlib import Path
 
 from geiter.core import GeiterStore
 from geiter.gateway import dispatch
-from geiter.providers import JsonlProvider, load_provider, observe_prompts
+from geiter.providers import JsonlProvider, ProviderAnswer, load_provider, observe_prompts, run_provider
 
 
 class GeiterStoreTests(unittest.TestCase):
@@ -181,6 +181,25 @@ class GeiterStoreTests(unittest.TestCase):
         self.assertEqual(len(observations), 1)
         self.assertEqual(observations[0]["data"]["provider"], "replay")
         self.assertEqual(load_provider("jsonl", path=fixture).name, "jsonl")
+
+    def test_run_ledger_records_success_and_failure_without_aborting_batch(self):
+        self.store.init()
+        prompt_a = self.store.add_prompt("What is Geiter?")
+        prompt_b = self.store.add_prompt("Why use Geiter?")
+
+        class FlakyProvider:
+            name = "flaky"
+
+            def answer(self, prompt):
+                if prompt == "Why use Geiter?":
+                    raise TimeoutError("provider timeout")
+                return ProviderAnswer(self.name, "Geiter is useful.", ["https://geiter.dev/docs"])
+
+        result = run_provider(self.store, [prompt_a, prompt_b], FlakyProvider())
+        self.assertEqual(result["run"]["data"]["status"], "partial")
+        self.assertEqual(result["run"]["data"]["summary"], {"expected": 2, "succeeded": 1, "failed": 1, "pending": 0})
+        self.assertEqual(len(result["observations"]), 1)
+        self.assertIn("TimeoutError", result["run"]["data"]["attempts"][1]["error"])
 
     def test_gateway_exposes_resources(self):
         self.store.init()

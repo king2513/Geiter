@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.3.0 - 2026-10-07
+
+- added durable provider run ledgers
+- recorded per-prompt failures without aborting the batch
+- exposed recent run summaries through reports and `geiter_runs`
+
 ## 1.2.0 - 2026-10-07
 
 - added observation quality metadata and provider health report

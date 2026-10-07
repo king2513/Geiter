@@ -6,7 +6,7 @@ from typing import Any
 
 from .core import GeiterStore
 from .gateway import serve
-from .providers import load_provider, observe_prompts
+from .providers import load_provider, run_provider
 
 
 def parser() -> argparse.ArgumentParser:
@@ -121,7 +121,8 @@ def main(argv: list[str] | None = None) -> None:
             "updated_at": state["updated_at"],
             "counts": {key: len(state.get(key, [])) for key in (
                 "goals", "memories", "prompts", "observations", "hypotheses",
-                "actions", "measurements", "learnings", "iterations", "baselines", "experiments",
+            "actions", "measurements", "learnings", "iterations", "baselines", "experiments",
+                "runs",
             )},
         }
     elif args.command == "inspect":
@@ -145,10 +146,7 @@ def main(argv: list[str] | None = None) -> None:
         if args.provider == "jsonl" and not args.fixture:
             raise SystemExit("run --provider jsonl requires --fixture")
         provider = load_provider(args.provider, path=args.fixture)
-        result = {
-            "provider": provider.name,
-            "observations": observe_prompts(store, store.prompts(), provider, args.target),
-        }
+        result = {"provider": provider.name, **run_provider(store, store.prompts(), provider, args.target)}
     elif args.command == "analyze":
         result = store.analyze()
     elif args.command == "health":

@@ -18,6 +18,7 @@ Geiter is an agent-native runtime for Generative Engine Optimization (GEO). It g
 - mention, citation, target-citation, and citation-position signals
 - direction-safe reciprocal-rank citation signal and paired comparisons
 - observation/provider health checks that filter unusable evidence
+- provider run ledger with per-prompt success/failure attempts
 - stdio JSON-RPC gateway with tools and resources
 - `doctor` consistency checks and `report` snapshots
 - replayable JSONL provider runs
@@ -107,6 +108,10 @@ answer(prompt: str) -> ProviderAnswer
 ```
 
 The built-in JSONL adapter is replay-only and has no network access, which keeps regression runs deterministic and reviewable.
+
+Every batch run creates a durable run ledger. Provider exceptions are recorded
+per prompt, successful observations are preserved, and the batch finishes as
+`completed` or `partial` instead of silently losing the failure.
 
 ## Design principles
 

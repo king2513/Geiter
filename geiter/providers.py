@@ -79,19 +79,32 @@ class JsonlProvider:
         )
 
 
-def observe_prompts(store, prompts: Iterable[dict], provider: Provider, target: str | None = None) -> list[dict]:
-    """Run a provider over prompts and persist every observation."""
+def observe_prompts(store, prompts: Iterable[dict], provider: Provider, target: str | None = None, run_id: str | None = None) -> list[dict]:
+    """Run a provider over prompts and persist successes and failures."""
     results = []
     for prompt in prompts:
-        response = provider.answer(prompt["data"]["text"])
-        results.append(store.record_observation(
-            prompt["id"],
-            response.provider,
-            response.answer,
-            response.citations,
-            target,
-        ))
+        try:
+            response = provider.answer(prompt["data"]["text"])
+            observation = store.record_observation(
+                prompt["id"], response.provider, response.answer, response.citations, target
+            )
+            results.append(observation)
+            if run_id:
+                store.record_run_attempt(run_id, prompt["id"], "succeeded", observation["id"])
+        except Exception as exc:
+            if run_id:
+                store.record_run_attempt(run_id, prompt["id"], "failed", error=f"{type(exc).__name__}: {exc}")
     return results
+
+
+def run_provider(store, prompts: Iterable[dict], provider: Provider, target: str | None = None) -> dict:
+    prompt_list = list(prompts)
+    run = store.start_run(provider.name, [prompt["id"] for prompt in prompt_list], target)
+    observations = observe_prompts(store, prompt_list, provider, target, run["id"])
+    return {
+        "run": store.finish_run(run["id"]),
+        "observations": observations,
+    }
 
 
 def load_provider(name: str, **kwargs) -> Provider:

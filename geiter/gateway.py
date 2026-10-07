@@ -54,6 +54,11 @@ TOOLS = [
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
+        "name": "geiter_runs",
+        "description": "Read recent provider run ledgers and their success/failure summaries.",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
         "name": "geiter_matrix",
         "description": "Analyze retrieval coverage by provider and prompt intent.",
         "inputSchema": {"type": "object", "properties": {}},
@@ -141,7 +146,7 @@ def dispatch(store: GeiterStore, request: dict[str, Any]) -> dict[str, Any] | No
     if method == "initialize":
         return _result(request_id, {
             "protocolVersion": "2025-06-18",
-            "serverInfo": {"name": "geiter", "version": "1.2.0"},
+            "serverInfo": {"name": "geiter", "version": "1.3.0"},
             "capabilities": {"tools": {}},
         })
     if method == "notifications/initialized":
@@ -197,6 +202,8 @@ def dispatch(store: GeiterStore, request: dict[str, Any]) -> dict[str, Any] | No
             value = store.analyze()
         elif name == "geiter_health":
             value = store.health()
+        elif name == "geiter_runs":
+            value = store.list_records("runs")[-20:]
         elif name == "geiter_matrix":
             value = store.analyze_matrix()
         elif name == "geiter_report":

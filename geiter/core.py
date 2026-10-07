@@ -64,6 +64,7 @@ class GeiterStore:
                 "iterations": [],
                 "baselines": [],
                 "experiments": [],
+                "runs": [],
             }
             self._write(state)
             self.event("workspace.initialized", {"schema": state["schema"]})
@@ -212,6 +213,66 @@ class GeiterStore:
             return []
         lines = self.events_path.read_text(encoding="utf-8").splitlines()
         return [json.loads(line) for line in lines[-limit:]]
+
+    def start_run(self, provider: str, prompt_ids: list[str], target: str | None = None) -> dict[str, Any]:
+        run = self.add(
+            "runs",
+            "provider.run",
+            {
+                "provider": provider,
+                "prompt_ids": prompt_ids,
+                "target": target,
+                "status": "running",
+                "attempts": [],
+            },
+        )
+        self.event("runs.started", run)
+        return run
+
+    def record_run_attempt(
+        self,
+        run_id: str,
+        prompt_id: str,
+        status: str,
+        observation_id: str | None = None,
+        error: str | None = None,
+    ) -> dict[str, Any]:
+        state = self.read()
+        run = next((item for item in state.get("runs", []) if item["id"] == run_id), None)
+        if run is None:
+            raise ValueError(f"unknown run id: {run_id}")
+        attempt = {
+            "prompt_id": prompt_id,
+            "status": status,
+            "observation_id": observation_id,
+            "error": error,
+            "at": now(),
+        }
+        run["data"]["attempts"].append(attempt)
+        self._write(state)
+        self.event("runs.attempted", {"run_id": run_id, **attempt})
+        return attempt
+
+    def finish_run(self, run_id: str) -> dict[str, Any]:
+        state = self.read()
+        run = next((item for item in state.get("runs", []) if item["id"] == run_id), None)
+        if run is None:
+            raise ValueError(f"unknown run id: {run_id}")
+        attempts = run["data"]["attempts"]
+        expected = set(run["data"]["prompt_ids"])
+        completed = {item["prompt_id"] for item in attempts if item["status"] == "succeeded"}
+        failed = {item["prompt_id"] for item in attempts if item["status"] == "failed"}
+        run["data"]["status"] = "completed" if expected <= completed else "partial"
+        run["data"]["summary"] = {
+            "expected": len(expected),
+            "succeeded": len(completed),
+            "failed": len(failed),
+            "pending": len(expected - completed - failed),
+        }
+        run["data"]["finished_at"] = now()
+        self._write(state)
+        self.event("runs.finished", {"run_id": run_id, "status": run["data"]["status"]})
+        return run
 
     def add_prompt(self, text: str, intent: str | None = None) -> dict[str, Any]:
         normalized = " ".join(text.split())
@@ -646,6 +707,8 @@ class GeiterStore:
             "event_count": len(self.events(limit=100000)),
             "baseline_count": len(state.get("baselines", [])),
             "experiment_count": len(state.get("experiments", [])),
+            "run_count": len(state.get("runs", [])),
+            "runs": state.get("runs", [])[-10:],
             "experiments": state.get("experiments", []),
             "latest_learnings": state.get("learnings", [])[-10:],
         }
