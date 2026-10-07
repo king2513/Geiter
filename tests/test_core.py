@@ -443,6 +443,13 @@ class GeiterStoreTests(unittest.TestCase):
         self.assertEqual(repeated["data"]["completion_evidence"], {"ticket": "evidence-1"})
         self.assertEqual([item["id"] for item in self.store.list_actions()], [normal["id"]])
 
+    def test_action_proposals_require_meaningful_text(self):
+        self.store.init()
+        with self.assertRaisesRegex(ValueError, "action_type"):
+            self.store.propose_action("", "A useful prompt")
+        with self.assertRaisesRegex(ValueError, "prompt"):
+            self.store.propose_action("review", " ")
+
     def test_status_report_and_capabilities_surface_open_actions(self):
         self.store.init()
         action = self.store.propose_action("review", "Review evidence")
@@ -451,6 +458,7 @@ class GeiterStoreTests(unittest.TestCase):
         self.assertEqual(report["open_actions"][0]["id"], action["id"])
         capabilities = self.store.capabilities()
         self.assertEqual(capabilities["action_queue"]["record_kind"], "agent.action")
+        self.assertIn("propose", capabilities["action_queue"]["operations"])
         self.store.claim_action(action["id"], "itr_test")
         active_report = self.store.report()
         self.assertEqual(active_report["open_action_count"], 0)
@@ -481,8 +489,34 @@ class GeiterStoreTests(unittest.TestCase):
         })
         names = {tool["name"] for tool in listed["result"]["content"][0]["json"]["tools"]}
         self.assertIn("geiter_capabilities", names)
+        self.assertIn("geiter_propose_action", names)
         self.assertIn("geiter_skip_action", names)
         self.assertIn("geiter_reclaim_action", names)
+
+    def test_gateway_proposes_deduplicated_action(self):
+        self.store.init()
+        request = {
+            "jsonrpc": "2.0", "id": 26, "method": "tools/call",
+            "params": {
+                "name": "geiter_propose_action",
+                "arguments": {
+                    "type": "investigate",
+                    "prompt": "Inspect the weakest citation cell",
+                    "priority": "high",
+                    "source": "agent:test",
+                    "dedupe_key": "coverage:weakest",
+                    "evidence": {"origin": "test"},
+                },
+            },
+        }
+        first = dispatch(self.store, request)
+        second = dispatch(self.store, {**request, "id": 27})
+        first_action = first["result"]["content"][0]["json"]
+        second_action = second["result"]["content"][0]["json"]
+        self.assertEqual(first_action["id"], second_action["id"])
+        self.assertEqual(first_action["data"]["priority"], "high")
+        self.assertEqual(first_action["data"]["evidence"], {"origin": "test"})
+        self.assertEqual(len(self.store.list_actions()), 1)
 
     def test_gateway_reclaims_stale_action(self):
         self.store.init()

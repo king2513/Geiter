@@ -86,9 +86,14 @@ def parser() -> argparse.ArgumentParser:
     connect.add_argument("--format", choices=("generic", "claude", "cursor", "vscode"), default="generic")
     connect.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
     action = commands.add_parser("action", help="Manage persisted agent actions")
-    action.add_argument("operation", choices=("list", "complete", "skip", "reclaim"))
+    action.add_argument("operation", choices=("list", "propose", "complete", "skip", "reclaim"))
     action.add_argument("action_id", nargs="?")
     action.add_argument("--status", choices=("open", "in_progress", "completed", "skipped", "stale", "all"), default="open")
+    action.add_argument("--type", dest="action_type")
+    action.add_argument("--prompt", dest="action_prompt")
+    action.add_argument("--priority", choices=("normal", "high", "critical"), default="normal")
+    action.add_argument("--source", default="agent")
+    action.add_argument("--dedupe-key")
     action.add_argument("--evidence")
     action.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
 
@@ -231,6 +236,18 @@ def main(argv: list[str] | None = None) -> None:
     elif args.command == "action":
         if args.operation == "list":
             result = store.list_actions(None if args.status == "all" else args.status)
+        elif args.operation == "propose":
+            if not args.action_type or not args.action_prompt:
+                raise SystemExit("action propose requires --type and --prompt")
+            evidence = {"text": args.evidence} if args.evidence else None
+            result = store.propose_action(
+                args.action_type,
+                args.action_prompt,
+                priority=args.priority,
+                source=args.source,
+                dedupe_key=args.dedupe_key,
+                evidence=evidence,
+            )
         else:
             if not args.action_id:
                 raise SystemExit(f"action {args.operation} requires action_id")

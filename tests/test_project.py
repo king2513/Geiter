@@ -26,6 +26,7 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn("python -m geiter regression", readme)
         self.assertIn("geiter://capabilities", readme)
         self.assertIn("action list", readme)
+        self.assertIn("action propose", readme)
         self.assertIn("action skip", readme)
         self.assertIn("action reclaim", readme)
 

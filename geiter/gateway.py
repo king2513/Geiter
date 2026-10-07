@@ -79,6 +79,22 @@ TOOLS = [
         },
     },
     {
+        "name": "geiter_propose_action",
+        "description": "Persist a new agent action without executing external effects.",
+        "inputSchema": {
+            "type": "object",
+            "required": ["type", "prompt"],
+            "properties": {
+                "type": {"type": "string"},
+                "prompt": {"type": "string"},
+                "priority": {"type": "string", "enum": ["normal", "high", "critical"]},
+                "source": {"type": "string"},
+                "dedupe_key": {"type": "string"},
+                "evidence": {"type": "object"},
+            },
+        },
+    },
+    {
         "name": "geiter_complete_action",
         "description": "Mark a persisted agent action complete with optional evidence.",
         "inputSchema": {
@@ -317,6 +333,15 @@ def dispatch(store: GeiterStore, request: dict[str, Any]) -> dict[str, Any] | No
         elif name == "geiter_actions":
             status = args.get("status", "open")
             value = store.list_actions(None if status == "all" else status)
+        elif name == "geiter_propose_action":
+            value = store.propose_action(
+                args["type"],
+                args["prompt"],
+                priority=args.get("priority", "normal"),
+                source=args.get("source", "agent"),
+                dedupe_key=args.get("dedupe_key"),
+                evidence=args.get("evidence"),
+            )
         elif name == "geiter_complete_action":
             value = store.complete_action(args["action_id"], args.get("evidence"))
         elif name == "geiter_skip_action":

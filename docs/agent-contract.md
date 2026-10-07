@@ -27,10 +27,10 @@ experiment approve --id <experiment-id> --json
 experiment result --id <experiment-id> --outcome <supported|rejected|inconclusive> --evidence <text> --json
 iterate [--hypothesis <text>] --json
 action list [--status <open|in_progress|completed|skipped|stale|all>] --json
+action propose --type <type> --prompt <text> [--priority <normal|high|critical>] [--source <source>] [--dedupe-key <key>] --json
 action complete <action-id> [--evidence <text>] --json
 action skip <action-id> [--evidence <text>] --json
 action reclaim <action-id> [--evidence <text>] --json
-iterate [--hypothesis <text>] --json
 event list --json
 ```
 
@@ -38,10 +38,12 @@ For process-based integrations, run `python -m geiter gateway` and send one
 JSON-RPC request per line over stdin. Responses are one JSON object per line.
 `initialize` advertises both `tools` and `resources` capabilities. Invalid
 JSON-RPC envelopes return `-32600`; unexpected server failures return `-32603`.
-The gateway currently exposes `geiter_status`, `geiter_add_prompt`,
-`geiter_record_observation`, `geiter_analyze`, `geiter_report`, and
-`geiter_resume`. The resume tool requires `run_id` and `provider`, plus
-`fixture` for the built-in JSONL provider.
+The gateway exposes the same contract through typed tools for status, prompts,
+observations, analysis, health, runs, capabilities, actions, connections,
+baselines, experiments, iteration, regression, and resumable provider runs.
+`tools/list` is the authoritative discovery surface; the action tools include
+`geiter_actions`, `geiter_propose_action`, `geiter_complete_action`,
+`geiter_skip_action`, and `geiter_reclaim_action`.
 `geiter_connect` returns the same configuration shape as the CLI and never
 writes client configuration files.
 `geiter_capabilities` and `geiter://capabilities` expose the same stable
@@ -52,9 +54,11 @@ check names, and a typed next-step `action`.
 The gate action is also persisted as an `agent.action` record. `iterate`
 claims the highest-priority open action and records it in the iteration trace;
 claiming does not imply that external work was completed.
-`geiter_actions` lists queued actions by priority; `geiter_complete_action`
-or `geiter_skip_action` resolves one with optional evidence. Open actions with
-the same dedupe key are idempotent. Status and report payloads expose both
+`geiter_actions` lists queued actions by priority; `geiter_propose_action`
+persists a new action without executing external effects; and
+`geiter_complete_action` or `geiter_skip_action` resolves one with optional
+evidence. Open actions with the same dedupe key are idempotent. Status and
+report payloads expose both
 `open_action_count` and `in_progress_action_count`, plus stale action counts.
 Claims carry a one-hour lease by default. `geiter_actions` accepts the virtual
 `stale` status, and `geiter_reclaim_action` requeues an expired claim to `open`.

@@ -388,11 +388,13 @@ class GeiterStore:
                 "regression": "python -m geiter regression --provider jsonl --fixture <path> --json",
                 "iteration": "python -m geiter iterate --json",
                 "actions": "python -m geiter action list --json",
+                "propose_action": "python -m geiter action propose --type <type> --prompt <text> --json",
             },
             "action_queue": {
                 "record_kind": "agent.action",
                 "statuses": ["open", "in_progress", "completed", "skipped"],
                 "virtual_filters": ["stale"],
+                "operations": ["list", "propose", "complete", "skip", "reclaim"],
                 "ordering": "priority_then_created_at",
                 "resolution_outcomes": ["completed", "skipped"],
                 "active_status": "in_progress",
@@ -417,6 +419,10 @@ class GeiterStore:
         evidence: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Persist an actionable next step without executing external effects."""
+        if not isinstance(action_type, str) or not action_type.strip():
+            raise ValueError("action_type must be a non-empty string")
+        if not isinstance(prompt, str) or not prompt.strip():
+            raise ValueError("prompt must be a non-empty string")
         if priority not in {"normal", "high", "critical"}:
             raise ValueError(f"unsupported action priority: {priority}")
         state = self.read()

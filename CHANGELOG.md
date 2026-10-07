@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.15.0 - 2026-10-07
+
+- exposed agent-authored action proposals through the CLI and gateway
+- documented action queue operations and expanded gateway discovery guidance
+
 ## 1.14.0 - 2026-10-07
 
 - added one-hour leases to claimed agent actions

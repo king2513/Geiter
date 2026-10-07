@@ -30,6 +30,7 @@ Geiter is an agent-native runtime for Generative Engine Optimization (GEO). It g
 - experiment result ledger linking evidence, comparisons, and learnings
 - evidence-aware `iterate` cycles that consume comparisons and pending experiments
 - persistent prioritized agent action queue with evidence-backed completion
+- agent-proposed actions with deduplication and explicit priorities
 - lease-backed action recovery for interrupted agent work
 - provider/intent coverage matrix with weakest-cell recommendations
 - zero runtime dependencies; Python 3.10+
@@ -58,6 +59,7 @@ python -m geiter baseline compare --json
 python -m geiter experiment propose --hypothesis "Improve citation rate" --change "Add authoritative docs" --json
 python -m geiter experiment result --id <experiment-id> --outcome supported --evidence "Citation rate improved" --json
 python -m geiter iterate --json
+python -m geiter action propose --type investigate --prompt "Check the weakest citation cell" --priority high --json
 python -m geiter action list --json
 python -m geiter action list --status stale --json
 python -m geiter action complete <action-id> --evidence "Verified the repair" --json
@@ -118,7 +120,7 @@ printf '%s\n' \
   | python -m geiter gateway
 ```
 
-Tools include `geiter_status`, `geiter_add_prompt`, `geiter_record_observation`, `geiter_analyze`, `geiter_report`, `geiter_resume`, `geiter_regression`, `geiter_actions`, `geiter_complete_action`, `geiter_skip_action`, `geiter_reclaim_action`, and `geiter_capabilities`. Resources include `geiter://status`, `geiter://report`, and `geiter://capabilities`.
+Tools include `geiter_status`, `geiter_add_prompt`, `geiter_record_observation`, `geiter_analyze`, `geiter_health`, `geiter_runs`, `geiter_report`, `geiter_resume`, `geiter_regression`, `geiter_matrix`, `geiter_save_baseline`, `geiter_compare`, `geiter_propose_experiment`, `geiter_record_experiment_result`, `geiter_iterate`, `geiter_actions`, `geiter_propose_action`, `geiter_complete_action`, `geiter_skip_action`, `geiter_reclaim_action`, `geiter_connect`, and `geiter_capabilities`. Resources include `geiter://status`, `geiter://report`, and `geiter://capabilities`.
 
 To resume a provider run from an agent client:
 
@@ -154,8 +156,9 @@ principles without changing workspace state.
 
 Regression gate actions are persisted in the workspace. `iterate` claims the
 highest-priority open action without pretending to execute external work.
-Agents can inspect them by priority with `action list`, then complete or skip
-them with evidence using `action complete` or `action skip`.
+Agents can propose work with `action propose`, inspect it by priority with
+`action list`, then complete or skip it with evidence using `action complete` or
+`action skip`.
 Reports distinguish open work from in-progress work so claimed actions remain
 visible across processes. Claims carry a one-hour lease by default. Interrupted
 claims appear under `action list --status stale` and can be requeued with
