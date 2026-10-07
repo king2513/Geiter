@@ -24,6 +24,7 @@ Geiter is an agent-native runtime for Generative Engine Optimization (GEO). It g
 - policy-gated experiment proposals with explicit approval
 - experiment result ledger linking evidence, comparisons, and learnings
 - evidence-aware `iterate` cycles that consume comparisons and pending experiments
+- provider/intent coverage matrix with weakest-cell recommendations
 - zero runtime dependencies; Python 3.10+
 
 ## Quick start
@@ -35,6 +36,7 @@ python -m geiter prompt add "What is Geiter?" --intent discovery
 python -m geiter prompt list --json
 python -m geiter observe <prompt-id> --provider fixture --answer "Geiter is an agent-native GEO runtime." --citation https://example.com/geiter
 python -m geiter analyze --json
+python -m geiter matrix --json
 python -m geiter doctor --json
 python -m geiter report --json
 python -m geiter baseline save --label before-change --json

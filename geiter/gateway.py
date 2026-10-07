@@ -49,6 +49,11 @@ TOOLS = [
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
+        "name": "geiter_matrix",
+        "description": "Analyze retrieval coverage by provider and prompt intent.",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
         "name": "geiter_report",
         "description": "Return a complete machine-readable GEO report.",
         "inputSchema": {"type": "object", "properties": {}},
@@ -131,7 +136,7 @@ def dispatch(store: GeiterStore, request: dict[str, Any]) -> dict[str, Any] | No
     if method == "initialize":
         return _result(request_id, {
             "protocolVersion": "2025-06-18",
-            "serverInfo": {"name": "geiter", "version": "0.9.0"},
+            "serverInfo": {"name": "geiter", "version": "1.0.0"},
             "capabilities": {"tools": {}},
         })
     if method == "notifications/initialized":
@@ -185,6 +190,8 @@ def dispatch(store: GeiterStore, request: dict[str, Any]) -> dict[str, Any] | No
             )
         elif name == "geiter_analyze":
             value = store.analyze()
+        elif name == "geiter_matrix":
+            value = store.analyze_matrix()
         elif name == "geiter_report":
             value = store.report()
         elif name == "geiter_save_baseline":

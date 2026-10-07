@@ -312,6 +312,45 @@ class GeiterStore:
         ]
         return self._analyze_observations(state, observations)
 
+    def analyze_matrix(self) -> dict[str, Any]:
+        state = self.read()
+        observations = [item for item in state["observations"] if item["kind"] == "retrieval.observation"]
+        groups: dict[str, list[dict[str, Any]]] = {}
+        prompt_map = {item["id"]: item for item in state["prompts"]}
+        for observation in observations:
+            prompt = prompt_map.get(observation["data"]["prompt_id"], {})
+            intent = prompt.get("data", {}).get("intent") or "unspecified"
+            key = f"{observation['data']['provider']}::{intent}"
+            groups.setdefault(key, []).append(observation)
+        cells = []
+        for key, items in sorted(groups.items()):
+            provider, intent = key.split("::", 1)
+            analysis = self._analyze_observations(state, items)
+            cells.append({
+                "provider": provider,
+                "intent": intent,
+                "analysis": analysis,
+            })
+        weakest = sorted(
+            cells,
+            key=lambda cell: (
+                cell["analysis"]["metrics"]["target_citation_rate"] is None,
+                cell["analysis"]["metrics"]["target_citation_rate"] or 0,
+                cell["analysis"]["metrics"]["mention_rate"] or 0,
+            ),
+        )[:3]
+        return {
+            "schema": "geiter/matrix-v1",
+            "generated_at": now(),
+            "cells": cells,
+            "cell_count": len(cells),
+            "weakest_cells": weakest,
+            "next_action": (
+                "Add prompts or provider coverage for the weakest cells."
+                if weakest else "Add prompts and provider observations to build the coverage matrix."
+            ),
+        }
+
     def save_baseline(self, label: str | None = None) -> dict[str, Any]:
         analysis = self.analyze()
         baseline = self.add(
@@ -532,6 +571,7 @@ class GeiterStore:
             "goals": state["goals"],
             "memory_count": len(state["memories"]),
             "analysis": analysis,
+            "matrix": self.analyze_matrix(),
             "doctor": doctor,
             "latest_iteration": state["iterations"][-1] if state["iterations"] else None,
             "event_count": len(self.events(limit=100000)),

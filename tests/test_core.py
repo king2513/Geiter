@@ -76,6 +76,17 @@ class GeiterStoreTests(unittest.TestCase):
         comparison = self.store.compare()
         self.assertEqual(comparison["status"], "no_baseline")
 
+    def test_matrix_groups_provider_and_intent_and_finds_weakest(self):
+        self.store.init()
+        prompt_a = self.store.add_prompt("What is Geiter?", "discovery")
+        prompt_b = self.store.add_prompt("Why use Geiter?", "evaluation")
+        self.store.record_observation(prompt_a["id"], "provider-a", "Geiter is useful.", ["https://geiter.dev/docs"])
+        self.store.record_observation(prompt_b["id"], "provider-b", "A generic answer.", [])
+        matrix = self.store.analyze_matrix()
+        self.assertEqual(matrix["cell_count"], 2)
+        self.assertEqual(matrix["weakest_cells"][0]["provider"], "provider-b")
+        self.assertEqual(matrix["weakest_cells"][0]["intent"], "evaluation")
+
     def test_prompt_identity_is_deterministic_and_deduplicated(self):
         self.store.init()
         first = self.store.add_prompt("  What is   Geiter? ")

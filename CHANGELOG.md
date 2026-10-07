@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.0 - 2026-10-07
+
+- added provider and prompt-intent coverage matrix analysis
+- added weakest-cell recommendations for agent prioritization
+- promoted the stable agent-native GEO contract to version 1.0
+
 ## 0.9.0 - 2026-10-07
 
 - made `iterate` evidence-aware

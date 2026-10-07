@@ -44,6 +44,8 @@ def parser() -> argparse.ArgumentParser:
 
     analyze = commands.add_parser("analyze", help="Analyze retrieval observations")
     analyze.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
+    matrix = commands.add_parser("matrix", help="Analyze coverage by provider and prompt intent")
+    matrix.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
     baseline = commands.add_parser("baseline", help="Manage analysis baselines")
     baseline.add_argument("action", choices=("save", "compare"))
     baseline.add_argument("--label")
@@ -147,6 +149,8 @@ def main(argv: list[str] | None = None) -> None:
         }
     elif args.command == "analyze":
         result = store.analyze()
+    elif args.command == "matrix":
+        result = store.analyze_matrix()
     elif args.command == "baseline":
         result = store.save_baseline(args.label) if args.action == "save" else store.compare(args.id)
     elif args.command == "experiment":

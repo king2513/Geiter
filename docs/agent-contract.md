@@ -12,6 +12,7 @@ prompt add <text> [--intent <intent>] --json
 prompt list --json
 observe <prompt-id> --provider <name> --answer <text> [--citation <url>] --json
 analyze --json
+matrix --json
 doctor --json
 report --json
 run --provider jsonl --fixture <path> --json
@@ -69,6 +70,8 @@ An approved experiment can be completed with a structured result, which writes
 an `experiment.result` learning containing the selected comparison and evidence.
 `iterate` includes the latest comparison context, pending approved experiments,
 and a next prompt chosen from those signals.
+`matrix` groups observations by provider and prompt intent, then returns the
+weakest cells an agent should improve first.
 
 Installed provider plugins are discovered through the `geiter.providers` Python
 entry-point group. A plugin factory must return an object with:
