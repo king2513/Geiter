@@ -336,6 +336,46 @@ class GeiterStore:
             "protocol": "json-rpc",
         }
 
+    def regression_gate(self, run: dict[str, Any]) -> dict[str, Any]:
+        """Evaluate a provider run and workspace health as one machine gate."""
+        health = self.health()
+        doctor = self.doctor()
+        summary = run["data"].get("summary", {})
+        checks = [
+            {
+                "name": "prompts_present",
+                "ok": summary.get("expected", 0) > 0,
+                "detail": summary.get("expected", 0),
+            },
+            {
+                "name": "run_completed",
+                "ok": run["data"].get("status") == "completed",
+                "detail": run["data"].get("status"),
+            },
+            {
+                "name": "observations_usable",
+                "ok": health["unusable_count"] == 0,
+                "detail": health["unusable_count"],
+            },
+            {
+                "name": "workspace_consistent",
+                "ok": doctor["ok"],
+                "detail": doctor["next_action"],
+            },
+        ]
+        return {
+            "schema": "geiter/gate-v1",
+            "ok": all(check["ok"] for check in checks),
+            "run_id": run["id"],
+            "provider": run["data"]["provider"],
+            "summary": summary,
+            "checks": checks,
+            "health": health,
+            "doctor": doctor,
+            "next_action": "Regression gate passed." if all(check["ok"] for check in checks)
+            else "Repair failed checks before trusting this regression run.",
+        }
+
     def add_prompt(self, text: str, intent: str | None = None) -> dict[str, Any]:
         normalized = " ".join(text.split())
         if not normalized:

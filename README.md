@@ -61,7 +61,9 @@ python -m geiter iterate --json
 Replay a deterministic provider batch:
 
 ```bash
+python -m geiter prompt add "What is Geiter?" --intent discovery
 python -m geiter run --provider jsonl --fixture examples/answers.jsonl --json
+python -m geiter regression --provider jsonl --fixture examples/answers.jsonl --json
 # Continue a run after a process interruption.
 python -m geiter resume <run-id> --provider jsonl --fixture examples/answers.jsonl --json
 ```
@@ -109,7 +111,7 @@ printf '%s\n' \
   | python -m geiter gateway
 ```
 
-Tools include `geiter_status`, `geiter_add_prompt`, `geiter_record_observation`, `geiter_analyze`, and `geiter_report`. Resources include `geiter://status` and `geiter://report`.
+Tools include `geiter_status`, `geiter_add_prompt`, `geiter_record_observation`, `geiter_analyze`, `geiter_report`, `geiter_resume`, and `geiter_regression`. Resources include `geiter://status` and `geiter://report`.
 
 To resume a provider run from an agent client:
 
@@ -133,6 +135,10 @@ answer(prompt: str) -> ProviderAnswer
 ```
 
 The built-in JSONL adapter is replay-only and has no network access, which keeps regression runs deterministic and reviewable.
+
+`regression` runs a fixture against all configured prompts and returns a
+`geiter/gate-v1` object with an `ok` boolean, named checks, health diagnostics,
+and the run ID. Agents and CI can use this as a single pass/fail contract.
 
 Every batch run creates a durable run ledger. Provider exceptions are recorded
 per prompt, successful observations are preserved, and the batch finishes as

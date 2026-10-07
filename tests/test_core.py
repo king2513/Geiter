@@ -5,7 +5,15 @@ from pathlib import Path
 
 from geiter.core import GeiterStore
 from geiter.gateway import dispatch
-from geiter.providers import JsonlProvider, ProviderAnswer, load_provider, observe_prompts, resume_provider, run_provider
+from geiter.providers import (
+    JsonlProvider,
+    ProviderAnswer,
+    load_provider,
+    observe_prompts,
+    regression_run,
+    resume_provider,
+    run_provider,
+)
 
 
 class GeiterStoreTests(unittest.TestCase):
@@ -307,6 +315,21 @@ class GeiterStoreTests(unittest.TestCase):
         })
         value = response["result"]["content"][0]["json"]
         self.assertEqual(value["servers"]["geiter"]["type"], "stdio")
+
+    def test_regression_gate_is_machine_decidable(self):
+        self.store.init()
+        self.store.add_prompt("What is Geiter?")
+        result = regression_run(self.store, self.store.prompts(), load_provider("fixture"))
+        self.assertTrue(result["gate"]["ok"])
+        self.assertEqual(result["gate"]["schema"], "geiter/gate-v1")
+        self.assertEqual(result["gate"]["checks"][1]["name"], "run_completed")
+
+    def test_regression_gate_rejects_empty_batches(self):
+        self.store.init()
+        result = regression_run(self.store, [], load_provider("fixture"))
+        self.assertFalse(result["gate"]["ok"])
+        checks = {check["name"]: check["ok"] for check in result["gate"]["checks"]}
+        self.assertFalse(checks["prompts_present"])
 
     def test_gateway_exposes_resources(self):
         self.store.init()

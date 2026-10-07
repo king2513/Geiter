@@ -11,7 +11,7 @@ import sys
 from typing import Any
 
 from .core import GeiterStore
-from .providers import load_provider, resume_provider
+from .providers import load_provider, regression_run, resume_provider
 
 
 TOOLS = [
@@ -79,6 +79,19 @@ TOOLS = [
                 "run_id": {"type": "string"},
                 "provider": {"type": "string"},
                 "fixture": {"type": "string"},
+            },
+        },
+    },
+    {
+        "name": "geiter_regression",
+        "description": "Run a deterministic provider batch and return its quality gate.",
+        "inputSchema": {
+            "type": "object",
+            "required": ["provider"],
+            "properties": {
+                "provider": {"type": "string"},
+                "fixture": {"type": "string"},
+                "target": {"type": "string"},
             },
         },
     },
@@ -170,7 +183,7 @@ def dispatch(store: GeiterStore, request: dict[str, Any]) -> dict[str, Any] | No
     if method == "initialize":
         return _result(request_id, {
             "protocolVersion": "2025-06-18",
-            "serverInfo": {"name": "geiter", "version": "1.7.0"},
+            "serverInfo": {"name": "geiter", "version": "1.8.1"},
             "capabilities": {"tools": {}},
         })
     if method == "notifications/initialized":
@@ -249,6 +262,19 @@ def dispatch(store: GeiterStore, request: dict[str, Any]) -> dict[str, Any] | No
                     store,
                     args["run_id"],
                     load_provider(provider_name, path=args.get("fixture")),
+                ),
+            }
+        elif name == "geiter_regression":
+            provider_name = args["provider"]
+            if provider_name == "jsonl" and not args.get("fixture"):
+                raise ValueError("geiter_regression with jsonl requires fixture")
+            value = {
+                "provider": provider_name,
+                **regression_run(
+                    store,
+                    store.prompts(),
+                    load_provider(provider_name, path=args.get("fixture")),
+                    args.get("target"),
                 ),
             }
         elif name == "geiter_matrix":

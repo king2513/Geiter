@@ -166,6 +166,15 @@ def resume_provider(store, run_id: str, provider: Provider) -> dict:
     }
 
 
+def regression_run(store, prompts: Iterable[dict], provider: Provider, target: str | None = None) -> dict:
+    """Run a deterministic batch and return its machine-readable quality gate."""
+    result = run_provider(store, prompts, provider, target, max_attempts=1)
+    return {
+        **result,
+        "gate": store.regression_gate(result["run"]),
+    }
+
+
 def load_provider(name: str, **kwargs) -> Provider:
     """Load a built-in or installed provider plugin by name."""
     if name == "jsonl":

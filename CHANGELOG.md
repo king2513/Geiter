@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.8.1 - 2026-10-07
+
+- rejected empty regression batches instead of treating them as passing gates
+
+## 1.8.0 - 2026-10-07
+
+- added deterministic provider regression gate with machine-readable checks
+- exposed regression runs through the CLI and agent gateway
+
 ## 1.7.0 - 2026-10-07
 
 - added client-ready agent connection configuration output
