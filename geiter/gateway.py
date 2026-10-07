@@ -53,6 +53,29 @@ TOOLS = [
         "description": "Return a complete machine-readable GEO report.",
         "inputSchema": {"type": "object", "properties": {}},
     },
+    {
+        "name": "geiter_save_baseline",
+        "description": "Persist the current analysis as a comparison baseline.",
+        "inputSchema": {"type": "object", "properties": {"label": {"type": "string"}}},
+    },
+    {
+        "name": "geiter_compare",
+        "description": "Compare current retrieval metrics with a saved baseline.",
+        "inputSchema": {"type": "object", "properties": {"baseline_id": {"type": "string"}}},
+    },
+    {
+        "name": "geiter_propose_experiment",
+        "description": "Propose a policy-gated experiment without external side effects.",
+        "inputSchema": {
+            "type": "object",
+            "required": ["hypothesis", "change"],
+            "properties": {
+                "hypothesis": {"type": "string"},
+                "change": {"type": "string"},
+                "risk": {"type": "string"},
+            },
+        },
+    },
 ]
 
 RESOURCES = [
@@ -86,7 +109,7 @@ def dispatch(store: GeiterStore, request: dict[str, Any]) -> dict[str, Any] | No
     if method == "initialize":
         return _result(request_id, {
             "protocolVersion": "2025-06-18",
-            "serverInfo": {"name": "geiter", "version": "0.6.0"},
+            "serverInfo": {"name": "geiter", "version": "0.7.0"},
             "capabilities": {"tools": {}},
         })
     if method == "notifications/initialized":
@@ -105,7 +128,8 @@ def dispatch(store: GeiterStore, request: dict[str, Any]) -> dict[str, Any] | No
                 "updated_at": state["updated_at"],
                 "counts": {key: len(state.get(key, [])) for key in (
                     "goals", "memories", "prompts", "observations", "hypotheses",
-                    "actions", "measurements", "learnings", "iterations",
+                "actions", "measurements", "learnings", "iterations",
+                "baselines", "experiments",
                 )},
             }
         elif uri == "geiter://report":
@@ -141,6 +165,12 @@ def dispatch(store: GeiterStore, request: dict[str, Any]) -> dict[str, Any] | No
             value = store.analyze()
         elif name == "geiter_report":
             value = store.report()
+        elif name == "geiter_save_baseline":
+            value = store.save_baseline(args.get("label"))
+        elif name == "geiter_compare":
+            value = store.compare(args.get("baseline_id"))
+        elif name == "geiter_propose_experiment":
+            value = store.propose_experiment(args["hypothesis"], args["change"], args.get("risk", "low"))
         else:
             return _error(request_id, -32602, f"unknown tool: {name}")
     except (KeyError, ValueError) as exc:

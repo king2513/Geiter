@@ -44,6 +44,18 @@ def parser() -> argparse.ArgumentParser:
 
     analyze = commands.add_parser("analyze", help="Analyze retrieval observations")
     analyze.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
+    baseline = commands.add_parser("baseline", help="Manage analysis baselines")
+    baseline.add_argument("action", choices=("save", "compare"))
+    baseline.add_argument("--label")
+    baseline.add_argument("--id")
+    baseline.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
+    experiment = commands.add_parser("experiment", help="Propose or approve policy-gated experiments")
+    experiment.add_argument("action", choices=("propose", "approve"))
+    experiment.add_argument("--id")
+    experiment.add_argument("--hypothesis")
+    experiment.add_argument("--change")
+    experiment.add_argument("--risk", default="low")
+    experiment.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
     commands.add_parser("doctor", help="Validate workspace consistency").add_argument(
         "--json", action="store_true", help=argparse.SUPPRESS
     )
@@ -102,7 +114,7 @@ def main(argv: list[str] | None = None) -> None:
             "updated_at": state["updated_at"],
             "counts": {key: len(state.get(key, [])) for key in (
                 "goals", "memories", "prompts", "observations", "hypotheses",
-                "actions", "measurements", "learnings", "iterations",
+                "actions", "measurements", "learnings", "iterations", "baselines", "experiments",
             )},
         }
     elif args.command == "inspect":
@@ -132,6 +144,17 @@ def main(argv: list[str] | None = None) -> None:
         }
     elif args.command == "analyze":
         result = store.analyze()
+    elif args.command == "baseline":
+        result = store.save_baseline(args.label) if args.action == "save" else store.compare(args.id)
+    elif args.command == "experiment":
+        if args.action == "propose":
+            if not args.hypothesis or not args.change:
+                raise SystemExit("experiment propose requires --hypothesis and --change")
+            result = store.propose_experiment(args.hypothesis, args.change, args.risk)
+        else:
+            if not args.id:
+                raise SystemExit("experiment approve requires --id")
+            result = store.approve_experiment(args.id)
     elif args.command == "doctor":
         result = store.doctor()
     elif args.command == "report":

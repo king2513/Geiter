@@ -15,6 +15,10 @@ analyze --json
 doctor --json
 report --json
 run --provider jsonl --fixture <path> --json
+baseline save [--label <label>] --json
+baseline compare [--id <baseline-id>] --json
+experiment propose --hypothesis <text> --change <text> [--risk <level>] --json
+experiment approve --id <experiment-id> --json
 iterate [--hypothesis <text>] --json
 event list --json
 ```
@@ -54,6 +58,11 @@ answer(prompt) -> { provider, answer, citations[] }
 
 The built-in JSONL adapter is replay-only and has no network access. This makes
 regression runs safe to commit as fixtures and compare across Geiter versions.
+
+Baselines snapshot the current analysis. A comparison analyzes only observations
+recorded after the selected baseline, so repeated observations cannot masquerade
+as improvement. Experiments are proposals by default; approval only changes the
+local record and refuses experiments marked with external side effects.
 
 Installed provider plugins are discovered through the `geiter.providers` Python
 entry-point group. A plugin factory must return an object with:

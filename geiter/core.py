@@ -62,6 +62,8 @@ class GeiterStore:
                 "measurements": [],
                 "learnings": [],
                 "iterations": [],
+                "baselines": [],
+                "experiments": [],
             }
             self._write(state)
             self.event("workspace.initialized", {"schema": state["schema"]})
@@ -282,6 +284,57 @@ class GeiterStore:
             item for item in state["observations"]
             if item["kind"] == "retrieval.observation"
         ]
+        return self._analyze_observations(state, observations)
+
+    def save_baseline(self, label: str | None = None) -> dict[str, Any]:
+        analysis = self.analyze()
+        baseline = self.add(
+            "baselines",
+            "analysis.baseline",
+            {
+                "label": label or f"baseline-{len(self.list_records('baselines')) + 1}",
+                "analysis_schema": analysis["schema"],
+                "metrics": analysis["metrics"],
+                "coverage": analysis["coverage"],
+                "observation_ids": [item["id"] for item in analysis["observations"]],
+            },
+        )
+        self.event("baselines.saved", baseline)
+        return baseline
+
+    def compare(self, baseline_id: str | None = None) -> dict[str, Any]:
+        state = self.read()
+        baselines = state.get("baselines", [])
+        if not baselines:
+            return {
+                "schema": "geiter/comparison-v1",
+                "status": "no_baseline",
+                "next_action": "Save a baseline before comparing future observations.",
+            }
+        baseline = next((item for item in baselines if item["id"] == baseline_id), baselines[-1])
+        baseline_observation_ids = set(baseline["data"].get("observation_ids", []))
+        current_observations = [
+            item for item in state.get("observations", [])
+            if item["kind"] == "retrieval.observation" and item["id"] not in baseline_observation_ids
+        ]
+        current = self._analyze_observations(state, current_observations)
+        before = baseline["data"]["metrics"]
+        after = current["metrics"]
+        delta: dict[str, float | None] = {}
+        for key in ("mention_rate", "citation_rate", "target_citation_rate", "mean_citation_position"):
+            delta[key] = None if before.get(key) is None or after.get(key) is None else round(after[key] - before[key], 4)
+        return {
+            "schema": "geiter/comparison-v1",
+            "status": "compared",
+            "baseline": baseline,
+            "current": current,
+            "delta": delta,
+            "verdict": self._verdict(delta),
+            "next_action": self._comparison_action(delta),
+        }
+
+    @staticmethod
+    def _analyze_observations(state: dict[str, Any], observations: list[dict[str, Any]]) -> dict[str, Any]:
         count = len(observations)
         metrics = {
             "sample_size": count,
@@ -294,21 +347,71 @@ class GeiterStore:
                 2,
             ) if count else None,
         }
+        observed_prompt_ids = {item["data"]["prompt_id"] for item in observations}
         return {
             "schema": "geiter/analysis-v1",
             "generated_at": now(),
             "metrics": metrics,
             "coverage": {
                 "prompts": len(state["prompts"]),
-                "observed_prompts": len({item["data"]["prompt_id"] for item in observations}),
+                "observed_prompts": len(observed_prompt_ids),
                 "unobserved_prompt_ids": [
-                    item["id"] for item in state["prompts"]
-                    if item["id"] not in {observation["data"]["prompt_id"] for observation in observations}
+                    item["id"] for item in state["prompts"] if item["id"] not in observed_prompt_ids
                 ],
             },
             "observations": observations,
-            "next_action": self._recommendation(metrics, count),
+            "next_action": GeiterStore._recommendation(metrics, count),
         }
+
+    def propose_experiment(self, hypothesis: str, change: str, risk: str = "low") -> dict[str, Any]:
+        if not hypothesis.strip() or not change.strip():
+            raise ValueError("experiment hypothesis and change are required")
+        experiment = self.add(
+            "experiments",
+            "experiment.proposal",
+            {
+                "hypothesis": hypothesis.strip(),
+                "change": change.strip(),
+                "risk": risk,
+                "status": "proposed",
+                "approval_required": True,
+                "external_side_effects": False,
+            },
+        )
+        self.event("experiments.proposed", experiment)
+        return experiment
+
+    def approve_experiment(self, experiment_id: str) -> dict[str, Any]:
+        state = self.read()
+        experiment = next((item for item in state.get("experiments", []) if item["id"] == experiment_id), None)
+        if experiment is None:
+            raise ValueError(f"unknown experiment id: {experiment_id}")
+        if experiment["data"].get("external_side_effects"):
+            raise ValueError("experiments with external side effects require an explicit adapter")
+        experiment["data"]["status"] = "approved"
+        experiment["data"]["approved_at"] = now()
+        self._write(state)
+        self.event("experiments.approved", experiment)
+        return experiment
+
+    @staticmethod
+    def _verdict(delta: dict[str, float | None]) -> str:
+        values = [value for value in delta.values() if value is not None]
+        if not values:
+            return "insufficient_data"
+        if all(value >= 0 for value in values) and any(value > 0 for value in values):
+            return "improved"
+        if all(value <= 0 for value in values) and any(value < 0 for value in values):
+            return "regressed"
+        return "mixed"
+
+    @staticmethod
+    def _comparison_action(delta: dict[str, float | None]) -> str:
+        if delta.get("target_citation_rate") is not None and delta["target_citation_rate"] < 0:
+            return "Prioritize source attribution before increasing prompt volume."
+        if delta.get("mention_rate") is not None and delta["mention_rate"] < 0:
+            return "Investigate entity clarity and answer coverage before publishing changes."
+        return "Use the verdict to select the smallest next experiment and save a new baseline after it."
 
     @staticmethod
     def _recommendation(metrics: dict[str, Any], count: int) -> str:
@@ -370,4 +473,6 @@ class GeiterStore:
             "doctor": doctor,
             "latest_iteration": state["iterations"][-1] if state["iterations"] else None,
             "event_count": len(self.events(limit=100000)),
+            "baseline_count": len(state.get("baselines", [])),
+            "experiment_count": len(state.get("experiments", [])),
         }

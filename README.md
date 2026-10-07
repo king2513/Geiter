@@ -20,6 +20,8 @@ Geiter is an agent-native runtime for Generative Engine Optimization (GEO). It g
 - `doctor` consistency checks and `report` snapshots
 - replayable JSONL provider runs
 - installable provider plugins through `geiter.providers` entry points
+- baseline snapshots and delta comparisons between observation batches
+- policy-gated experiment proposals with explicit approval
 - zero runtime dependencies; Python 3.10+
 
 ## Quick start
@@ -33,6 +35,9 @@ python -m geiter observe <prompt-id> --provider fixture --answer "Geiter is an a
 python -m geiter analyze --json
 python -m geiter doctor --json
 python -m geiter report --json
+python -m geiter baseline save --label before-change --json
+python -m geiter baseline compare --json
+python -m geiter experiment propose --hypothesis "Improve citation rate" --change "Add authoritative docs" --json
 ```
 
 Replay a deterministic provider batch:

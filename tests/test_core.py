@@ -44,6 +44,26 @@ class GeiterStoreTests(unittest.TestCase):
         self.store.init()
         json.loads(self.store.state_path.read_text(encoding="utf-8"))
 
+    def test_baseline_comparison_and_policy_gate(self):
+        self.store.init()
+        prompt = self.store.add_prompt("What is Geiter?")
+        self.store.record_observation(prompt["id"], "fixture", "Geiter is an agent-native GEO runtime.", ["https://geiter.dev/docs"])
+        baseline = self.store.save_baseline("before")
+        self.store.record_observation(prompt["id"], "fixture", "Geiter is an agent-native GEO runtime.", ["https://geiter.dev/docs"])
+        comparison = self.store.compare(baseline["id"])
+        self.assertEqual(comparison["status"], "compared")
+        self.assertEqual(comparison["current"]["metrics"]["sample_size"], 1)
+        self.assertEqual(comparison["verdict"], "mixed")
+        proposal = self.store.propose_experiment("Improve citation rate", "Add an authoritative docs page")
+        self.assertEqual(proposal["data"]["status"], "proposed")
+        approved = self.store.approve_experiment(proposal["id"])
+        self.assertEqual(approved["data"]["status"], "approved")
+
+    def test_compare_without_baseline_is_explicit(self):
+        self.store.init()
+        comparison = self.store.compare()
+        self.assertEqual(comparison["status"], "no_baseline")
+
     def test_prompt_identity_is_deterministic_and_deduplicated(self):
         self.store.init()
         first = self.store.add_prompt("  What is   Geiter? ")
@@ -121,6 +141,14 @@ class GeiterStoreTests(unittest.TestCase):
             "params": {"uri": "geiter://status"},
         })
         self.assertEqual(read["result"]["content"][0]["json"]["contents"][0]["uri"], "geiter://status")
+
+    def test_gateway_exposes_experiment_tools(self):
+        self.store.init()
+        listed = dispatch(self.store, {"jsonrpc": "2.0", "id": 6, "method": "tools/list"})
+        names = {tool["name"] for tool in listed["result"]["content"][0]["json"]["tools"]}
+        self.assertIn("geiter_save_baseline", names)
+        self.assertIn("geiter_compare", names)
+        self.assertIn("geiter_propose_experiment", names)
 
     def test_provider_plugins_are_discovered(self):
         from unittest.mock import patch

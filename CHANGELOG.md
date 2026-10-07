@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.0 - 2026-10-07
+
+- added baseline snapshots and post-baseline delta comparisons
+- added explicit improved/regressed/mixed/insufficient-data verdicts
+- added policy-gated experiment proposals and approvals
+- fixed comparison semantics so baseline samples are not re-counted
+
 ## 0.6.0 - 2026-10-07
 
 - rebuilt README as an ASCII, agent-first project entry point
