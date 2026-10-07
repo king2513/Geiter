@@ -59,7 +59,7 @@ class GeiterStoreTests(unittest.TestCase):
         comparison = self.store.compare(baseline["id"])
         self.assertEqual(comparison["status"], "compared")
         self.assertEqual(comparison["current"]["metrics"]["sample_size"], 1)
-        self.assertEqual(comparison["verdict"], "mixed")
+        self.assertEqual(comparison["verdict"], "insufficient_data")
         proposal = self.store.propose_experiment("Improve citation rate", "Add an authoritative docs page")
         self.assertEqual(proposal["data"]["status"], "proposed")
         approved = self.store.approve_experiment(proposal["id"])
@@ -111,6 +111,20 @@ class GeiterStoreTests(unittest.TestCase):
         self.assertEqual(analysis["metrics"]["mention_rate"], 1.0)
         self.assertEqual(analysis["metrics"]["citation_rate"], 1.0)
         self.assertEqual(analysis["metrics"]["target_citation_rate"], 0.0)
+        self.assertEqual(analysis["metrics"]["mean_citation_reciprocal_rank"], 0.0)
+
+    def test_comparison_requires_paired_sample_and_uses_directional_rank(self):
+        self.store.init()
+        prompt_a = self.store.add_prompt("What is Geiter?", "discovery")
+        prompt_b = self.store.add_prompt("Why use Geiter?", "evaluation")
+        self.store.record_observation(prompt_a["id"], "provider-a", "Geiter", ["https://other.test"])
+        self.store.record_observation(prompt_b["id"], "provider-a", "Geiter", ["https://other.test"])
+        baseline = self.store.save_baseline("before")
+        self.store.record_observation(prompt_a["id"], "provider-a", "Geiter", ["https://other.test", "https://geiter.dev/docs"])
+        comparison = self.store.compare(baseline["id"])
+        self.assertEqual(comparison["pairing"]["pair_count"], 1)
+        self.assertEqual(comparison["verdict"], "insufficient_data")
+        self.assertEqual(comparison["delta"]["mean_citation_reciprocal_rank"], 0.5)
 
     def test_doctor_and_report_are_machine_readable(self):
         self.store.init()

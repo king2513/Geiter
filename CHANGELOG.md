@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.1.0 - 2026-10-07
+
+- added citation reciprocal-rank metrics with consistent improvement direction
+- made baseline comparisons pair prompt/provider observations
+- added an `insufficient_data` verdict for underpowered comparisons
+- strengthened evaluation regression coverage
+
 ## 1.0.0 - 2026-10-07
 
 - added provider and prompt-intent coverage matrix analysis

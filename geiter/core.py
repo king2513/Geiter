@@ -289,6 +289,7 @@ class GeiterStore:
                     "citation": int(bool(clean_citations)),
                     "target_citation": int(bool(positions)),
                     "citation_position": positions[0] + 1 if positions else None,
+                    "citation_reciprocal_rank": round(1 / (positions[0] + 1), 4) if positions else 0.0,
                     "citation_count": len(clean_citations),
                 },
             },
@@ -382,19 +383,43 @@ class GeiterStore:
             item for item in state.get("observations", [])
             if item["kind"] == "retrieval.observation" and item["id"] not in baseline_observation_ids
         ]
-        current = self._analyze_observations(state, current_observations)
-        before = baseline["data"]["metrics"]
+        baseline_observations = [
+            item for item in state.get("observations", [])
+            if item["kind"] == "retrieval.observation" and item["id"] in baseline_observation_ids
+        ]
+        def group(items):
+            grouped = {}
+            for item in items:
+                grouped.setdefault((item["data"]["prompt_id"], item["data"]["provider"]), []).append(item)
+            return grouped
+        baseline_groups = group(baseline_observations)
+        current_groups = group(current_observations)
+        pairs = []
+        paired_before = []
+        paired_after = []
+        for key in sorted(set(baseline_groups) & set(current_groups)):
+            count = min(len(baseline_groups[key]), len(current_groups[key]))
+            for before_item, after_item in zip(baseline_groups[key][-count:], current_groups[key][-count:]):
+                paired_before.append(before_item)
+                paired_after.append(after_item)
+                pairs.append({"prompt_id": key[0], "provider": key[1], "baseline_observation_id": before_item["id"], "current_observation_id": after_item["id"]})
+        before_analysis = self._analyze_observations(state, paired_before)
+        current = self._analyze_observations(state, paired_after)
+        before = before_analysis["metrics"]
         after = current["metrics"]
         delta: dict[str, float | None] = {}
-        for key in ("mention_rate", "citation_rate", "target_citation_rate", "mean_citation_position"):
+        for key in ("mention_rate", "citation_rate", "target_citation_rate", "mean_citation_reciprocal_rank"):
             delta[key] = None if before.get(key) is None or after.get(key) is None else round(after[key] - before[key], 4)
+        verdict = self._verdict(delta) if len(pairs) >= 2 else "insufficient_data"
         return {
             "schema": "geiter/comparison-v1",
             "status": "compared",
             "baseline": baseline,
+            "baseline_paired": before_analysis,
             "current": current,
+            "pairing": {"pair_count": len(pairs), "minimum_pairs": 2, "pairs": pairs},
             "delta": delta,
-            "verdict": self._verdict(delta),
+            "verdict": verdict,
             "next_action": self._comparison_action(delta),
         }
 
@@ -410,6 +435,10 @@ class GeiterStore:
                 sum(item["data"]["metrics"]["citation_position"] for item in observations if item["data"]["metrics"]["citation_position"] is not None)
                 / max(1, sum(item["data"]["metrics"]["citation_position"] is not None for item in observations)),
                 2,
+            ) if count else None,
+            "mean_citation_reciprocal_rank": round(
+                sum(item["data"]["metrics"].get("citation_reciprocal_rank", 0.0) for item in observations) / count,
+                4,
             ) if count else None,
         }
         observed_prompt_ids = {item["data"]["prompt_id"] for item in observations}

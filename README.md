@@ -16,6 +16,7 @@ Geiter is an agent-native runtime for Generative Engine Optimization (GEO). It g
 - append-only event log in `.geiter/events.jsonl`
 - deterministic retrieval prompts and provider observations
 - mention, citation, target-citation, and citation-position signals
+- direction-safe reciprocal-rank citation signal and paired comparisons
 - stdio JSON-RPC gateway with tools and resources
 - `doctor` consistency checks and `report` snapshots
 - replayable JSONL provider runs

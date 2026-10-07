@@ -52,6 +52,7 @@ Each retrieval observation can contain:
 - `citation`: the answer contains at least one citation
 - `target_citation`: a citation resolves to a target token
 - `citation_position`: first target citation position, when available
+- `citation_reciprocal_rank`: direction-safe citation rank (`1 / position`)
 
 Provider adapters implement one small contract:
 
@@ -64,7 +65,9 @@ regression runs safe to commit as fixtures and compare across Geiter versions.
 
 Baselines snapshot the current analysis. A comparison analyzes only observations
 recorded after the selected baseline, so repeated observations cannot masquerade
-as improvement. Experiments are proposals by default; approval only changes the
+as improvement. Comparisons pair observations by prompt and provider, and only
+emit a directional verdict after at least two pairs; otherwise the verdict is
+`insufficient_data`. Experiments are proposals by default; approval only changes the
 local record and refuses experiments marked with external side effects.
 An approved experiment can be completed with a structured result, which writes
 an `experiment.result` learning containing the selected comparison and evidence.
