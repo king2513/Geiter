@@ -25,6 +25,7 @@ Geiter is an agent-native runtime for Generative Engine Optimization (GEO). It g
 - bounded agent bootstrap context through CLI, tool, and resource surfaces
 - `doctor` consistency checks and `report` snapshots
 - replayable JSONL provider runs
+- zero-dependency `http_json` provider for opt-in live retrieval
 - installable provider plugins through `geiter.providers` entry points
 - baseline snapshots and delta comparisons between observation batches
 - policy-gated experiment proposals with explicit approval
@@ -77,6 +78,16 @@ python -m geiter run --provider jsonl --fixture examples/answers.jsonl --json
 python -m geiter regression --provider jsonl --fixture examples/answers.jsonl --json
 # Continue a run after a process interruption.
 python -m geiter resume <run-id> --provider jsonl --fixture examples/answers.jsonl --json
+```
+
+For an explicitly configured live JSON provider, the request is a POST body
+`{"prompt":"..."}` and the response must contain `{"answer":"...","citations":[]}`:
+
+```bash
+python -m geiter run --provider http_json \
+  --endpoint https://provider.example/answer \
+  --header "Authorization: Bearer $GEITER_PROVIDER_TOKEN" \
+  --timeout 30 --json
 ```
 
 Use `--root` to point Geiter at another workspace:
@@ -136,7 +147,9 @@ To resume a provider run from an agent client:
 
 ## Provider plugins
 
-Third-party packages can register a provider without changing Geiter:
+The built-in `http_json` adapter performs no network call unless an agent
+explicitly selects it and supplies an endpoint. Third-party packages can also
+register a provider without changing Geiter:
 
 ```toml
 [project.entry-points."geiter.providers"]
@@ -149,7 +162,10 @@ The factory returns an object implementing:
 answer(prompt: str) -> ProviderAnswer
 ```
 
-The built-in JSONL adapter is replay-only and has no network access, which keeps regression runs deterministic and reviewable.
+The built-in JSONL adapter is replay-only and has no network access, which keeps
+regression runs deterministic and reviewable.
+Provider credentials are supplied at runtime and are not written into the
+state or event ledger.
 
 `regression` runs a fixture against all configured prompts and returns a
 `geiter/gate-v1` object with an `ok` boolean, named checks, health diagnostics,

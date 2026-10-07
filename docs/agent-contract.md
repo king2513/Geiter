@@ -18,8 +18,11 @@ doctor --json
 report --json
 context --json
 run --provider jsonl --fixture <path> --json
+run --provider http_json --endpoint <url> [--header "Name: value"] [--timeout <seconds>] --json
 regression --provider jsonl --fixture <path> --json
+regression --provider http_json --endpoint <url> [--header "Name: value"] [--timeout <seconds>] --json
 resume <run-id> --provider jsonl --fixture <path> --json
+resume <run-id> --provider http_json --endpoint <url> [--header "Name: value"] [--timeout <seconds>] --json
 connect [--format <generic|claude|cursor|vscode>] --json
 baseline save [--label <label>] --json
 baseline compare [--id <baseline-id>] --json
@@ -119,8 +122,14 @@ Provider adapters implement one small contract:
 answer(prompt) -> { provider, answer, citations[] }
 ```
 
-The built-in JSONL adapter is replay-only and has no network access. This makes
-regression runs safe to commit as fixtures and compare across Geiter versions.
+The built-in JSONL adapter is replay-only and has no network access. The
+optional `http_json` adapter sends `POST {"prompt":"..."}` to an explicitly
+configured `http(s)` endpoint and expects a JSON object with a non-empty
+`answer` and optional `citations` array. HTTP 408, 425, 429, 5xx, connection,
+and timeout failures are recorded as retryable; other HTTP statuses and invalid
+payloads are non-retryable provider errors. Credentials are passed at runtime
+and are never written to the Geiter state ledger. Replay runs remain safe to
+commit as fixtures and compare across Geiter versions.
 
 Baselines snapshot the current analysis. A comparison analyzes only observations
 recorded after the selected baseline, so repeated observations cannot masquerade

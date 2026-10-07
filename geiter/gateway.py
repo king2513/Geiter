@@ -155,12 +155,15 @@ TOOLS = [
                 "run_id": {"type": "string"},
                 "provider": {"type": "string"},
                 "fixture": {"type": "string"},
+                "endpoint": {"type": "string"},
+                "headers": {"type": "object", "additionalProperties": {"type": "string"}},
+                "timeout": {"type": "number"},
             },
         },
     },
     {
         "name": "geiter_regression",
-        "description": "Run a deterministic provider batch and return its quality gate and next action.",
+        "description": "Run a provider batch and return its quality gate and next action.",
         "inputSchema": {
             "type": "object",
             "required": ["provider"],
@@ -168,6 +171,9 @@ TOOLS = [
                 "provider": {"type": "string"},
                 "fixture": {"type": "string"},
                 "target": {"type": "string"},
+                "endpoint": {"type": "string"},
+                "headers": {"type": "object", "additionalProperties": {"type": "string"}},
+                "timeout": {"type": "number"},
             },
         },
     },
@@ -264,6 +270,17 @@ def _error(request_id: Any, code: int, message: str) -> dict[str, Any]:
     return {"jsonrpc": "2.0", "id": request_id, "error": {"code": code, "message": message}}
 
 
+def provider_kwargs(args: dict[str, Any]) -> dict[str, Any]:
+    if args.get("provider") != "http_json":
+        return {"path": args["fixture"]} if args.get("fixture") is not None else {}
+    kwargs: dict[str, Any] = {"endpoint": args.get("endpoint")}
+    if args.get("headers") is not None:
+        kwargs["headers"] = args["headers"]
+    if args.get("timeout") is not None:
+        kwargs["timeout"] = args["timeout"]
+    return kwargs
+
+
 def dispatch(store: GeiterStore, request: dict[str, Any]) -> dict[str, Any] | None:
     if request.get("jsonrpc") != "2.0" or "method" not in request:
         return _error(request.get("id"), -32600, "invalid JSON-RPC request")
@@ -353,24 +370,28 @@ def dispatch(store: GeiterStore, request: dict[str, Any]) -> dict[str, Any] | No
             provider_name = args["provider"]
             if provider_name == "jsonl" and not args.get("fixture"):
                 raise ValueError("geiter_resume with jsonl requires fixture")
+            if provider_name == "http_json" and not args.get("endpoint"):
+                raise ValueError("geiter_resume with http_json requires endpoint")
             value = {
                 "provider": provider_name,
                 **resume_provider(
                     store,
                     args["run_id"],
-                    load_provider(provider_name, path=args.get("fixture")),
+                    load_provider(provider_name, **provider_kwargs(args)),
                 ),
             }
         elif name == "geiter_regression":
             provider_name = args["provider"]
             if provider_name == "jsonl" and not args.get("fixture"):
                 raise ValueError("geiter_regression with jsonl requires fixture")
+            if provider_name == "http_json" and not args.get("endpoint"):
+                raise ValueError("geiter_regression with http_json requires endpoint")
             value = {
                 "provider": provider_name,
                 **regression_run(
                     store,
                     store.prompts(),
-                    load_provider(provider_name, path=args.get("fixture")),
+                    load_provider(provider_name, **provider_kwargs(args)),
                     args.get("target"),
                 ),
             }

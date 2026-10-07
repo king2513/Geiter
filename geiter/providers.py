@@ -12,6 +12,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from importlib.metadata import entry_points
 from typing import Iterable, Protocol
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlparse
+from urllib.request import Request, urlopen
 
 
 @dataclass(frozen=True)
@@ -77,6 +80,77 @@ class JsonlProvider:
         return self.answers.get(
             prompt,
             ProviderAnswer(self.name, f"No fixture answer configured for: {prompt}", []),
+        )
+
+
+class HttpJsonProvider:
+    """POST prompts to a JSON endpoint and parse the stable provider contract."""
+
+    name = "http_json"
+
+    def __init__(
+        self,
+        endpoint: str,
+        headers: dict[str, str] | None = None,
+        timeout: int | float = 30,
+    ):
+        if not isinstance(endpoint, str):
+            raise ValueError("http_json endpoint must be an absolute http(s) URL")
+        parsed = urlparse(endpoint)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ValueError("http_json endpoint must be an absolute http(s) URL")
+        if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or timeout <= 0:
+            raise ValueError("http_json timeout must be positive")
+        self.endpoint = endpoint
+        self.timeout = float(timeout)
+        self.headers = dict(headers or {})
+        for key, value in self.headers.items():
+            if not isinstance(key, str) or not key.strip() or "\r" in key or "\n" in key:
+                raise ValueError("http_json header names must be non-empty and newline-free")
+            if not isinstance(value, str) or "\r" in value or "\n" in value:
+                raise ValueError("http_json header values must be newline-free strings")
+
+    def answer(self, prompt: str) -> ProviderAnswer:
+        request = Request(
+            self.endpoint,
+            data=json.dumps({"prompt": prompt}).encode("utf-8"),
+            headers={
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+                **self.headers,
+            },
+            method="POST",
+        )
+        try:
+            with urlopen(request, timeout=self.timeout) as response:
+                raw = response.read()
+        except HTTPError as exc:
+            if exc.code in {408, 425, 429} or exc.code >= 500:
+                raise ConnectionError(
+                    f"http_json provider returned retryable status {exc.code}"
+                ) from exc
+            raise ValueError(f"http_json provider returned status {exc.code}") from exc
+        except (URLError, TimeoutError, OSError) as exc:
+            raise ConnectionError(f"http_json provider request failed: {exc}") from exc
+
+        try:
+            payload = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ValueError("http_json provider returned invalid JSON") from exc
+        if not isinstance(payload, dict):
+            raise ValueError("http_json provider response must be a JSON object")
+        answer = payload.get("answer")
+        if not isinstance(answer, str) or not answer.strip():
+            raise ValueError("http_json provider response requires a non-empty answer")
+        citations = payload.get("citations", [])
+        if citations is None:
+            citations = []
+        if not isinstance(citations, list):
+            raise ValueError("http_json provider citations must be an array")
+        return ProviderAnswer(
+            provider=str(payload.get("provider") or self.name),
+            answer=answer,
+            citations=[str(citation) for citation in citations],
         )
 
 
@@ -167,7 +241,7 @@ def resume_provider(store, run_id: str, provider: Provider) -> dict:
 
 
 def regression_run(store, prompts: Iterable[dict], provider: Provider, target: str | None = None) -> dict:
-    """Run a deterministic batch and return its machine-readable quality gate."""
+    """Run a provider batch and return its machine-readable quality gate."""
     result = run_provider(store, prompts, provider, target, max_attempts=1)
     return {
         **result,
@@ -181,6 +255,12 @@ def load_provider(name: str, **kwargs) -> Provider:
         return JsonlProvider(kwargs["path"])
     if name == "fixture":
         return FixtureProvider(kwargs.get("answers"))
+    if name == "http_json":
+        return HttpJsonProvider(
+            kwargs.get("endpoint"),
+            headers=kwargs.get("headers"),
+            timeout=kwargs.get("timeout", 30),
+        )
     discovered = entry_points()
     matches = discovered.select(group="geiter.providers", name=name)
     if not matches:

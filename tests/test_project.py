@@ -24,6 +24,7 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn('"name":"geiter_resume"', readme)
         self.assertIn("python -m geiter connect", readme)
         self.assertIn("python -m geiter regression", readme)
+        self.assertIn("http_json", readme)
         self.assertIn("geiter://capabilities", readme)
         self.assertIn("context --json", readme)
         self.assertIn("action list", readme)

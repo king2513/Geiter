@@ -386,11 +386,27 @@ class GeiterStore:
             "entrypoints": {
                 "connect": "python -m geiter connect --format generic --json",
                 "gateway": "python -m geiter gateway",
-                "regression": "python -m geiter regression --provider jsonl --fixture <path> --json",
+                "run": "python -m geiter run --provider <name> [provider options] --json",
+                "regression": "python -m geiter regression --provider <name> [provider options] --json",
+                "resume": "python -m geiter resume <run-id> --provider <name> [provider options] --json",
                 "iteration": "python -m geiter iterate --json",
                 "context": "python -m geiter context --json",
                 "actions": "python -m geiter action list --json",
                 "propose_action": "python -m geiter action propose --type <type> --prompt <text> --json",
+            },
+            "providers": {
+                "built_in": {
+                    "fixture": {"network": False, "deterministic": True},
+                    "jsonl": {"network": False, "deterministic": True},
+                    "http_json": {
+                        "network": True,
+                        "deterministic": False,
+                        "request": "POST {\"prompt\":\"...\"}",
+                        "response": "{\"answer\":\"...\",\"citations\":[]}",
+                        "retryable_http_statuses": [408, 425, 429, "5xx"],
+                    },
+                },
+                "plugin_entrypoint": "geiter.providers",
             },
             "action_queue": {
                 "record_kind": "agent.action",

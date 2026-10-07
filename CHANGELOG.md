@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.17.0 - 2026-10-07
+
+- added the zero-dependency opt-in `http_json` live provider adapter
+- exposed endpoint, headers, and timeout configuration through CLI and gateway
+- classified retryable HTTP statuses without weakening deterministic fixture runs
+
 ## 1.16.0 - 2026-10-07
 
 - added a bounded read-only agent bootstrap context

@@ -40,18 +40,27 @@ def parser() -> argparse.ArgumentParser:
     run = commands.add_parser("run", help="Run a provider across all prompts")
     run.add_argument("--provider", required=True)
     run.add_argument("--fixture", help="Path to JSONL provider fixture")
+    run.add_argument("--endpoint", help="HTTP JSON provider endpoint")
+    run.add_argument("--header", action="append", default=[], help="HTTP header in 'Name: value' form")
+    run.add_argument("--timeout", type=float, default=30, help="HTTP provider timeout in seconds")
     run.add_argument("--target")
     run.add_argument("--max-attempts", type=int, default=1)
     run.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
-    regression = commands.add_parser("regression", help="Run a deterministic provider regression gate")
+    regression = commands.add_parser("regression", help="Run a provider regression gate")
     regression.add_argument("--provider", required=True)
     regression.add_argument("--fixture", help="Path to JSONL provider fixture")
+    regression.add_argument("--endpoint", help="HTTP JSON provider endpoint")
+    regression.add_argument("--header", action="append", default=[], help="HTTP header in 'Name: value' form")
+    regression.add_argument("--timeout", type=float, default=30, help="HTTP provider timeout in seconds")
     regression.add_argument("--target")
     regression.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
     resume = commands.add_parser("resume", help="Resume a provider run from its durable ledger")
     resume.add_argument("run_id")
     resume.add_argument("--provider", required=True)
     resume.add_argument("--fixture", help="Path to JSONL provider fixture")
+    resume.add_argument("--endpoint", help="HTTP JSON provider endpoint")
+    resume.add_argument("--header", action="append", default=[], help="HTTP header in 'Name: value' form")
+    resume.add_argument("--timeout", type=float, default=30, help="HTTP provider timeout in seconds")
     resume.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
 
     analyze = commands.add_parser("analyze", help="Analyze retrieval observations")
@@ -132,6 +141,20 @@ def emit(value: Any, as_json: bool) -> None:
         print(value)
 
 
+def provider_kwargs(args: argparse.Namespace) -> dict[str, Any]:
+    if args.provider != "http_json":
+        return {"path": args.fixture}
+    if not args.endpoint:
+        raise SystemExit(f"{args.command} --provider http_json requires --endpoint")
+    headers: dict[str, str] = {}
+    for item in args.header:
+        name, separator, value = item.partition(":")
+        if not separator or not name.strip():
+            raise SystemExit("--header requires 'Name: value'")
+        headers[name.strip()] = value.lstrip()
+    return {"endpoint": args.endpoint, "headers": headers, "timeout": args.timeout}
+
+
 def main(argv: list[str] | None = None) -> None:
     args = parser().parse_args(argv)
     store = GeiterStore(args.root)
@@ -163,7 +186,7 @@ def main(argv: list[str] | None = None) -> None:
     elif args.command == "run":
         if args.provider == "jsonl" and not args.fixture:
             raise SystemExit("run --provider jsonl requires --fixture")
-        provider = load_provider(args.provider, path=args.fixture)
+        provider = load_provider(args.provider, **provider_kwargs(args))
         result = {
             "provider": provider.name,
             **run_provider(store, store.prompts(), provider, args.target, args.max_attempts),
@@ -171,7 +194,7 @@ def main(argv: list[str] | None = None) -> None:
     elif args.command == "regression":
         if args.provider == "jsonl" and not args.fixture:
             raise SystemExit("regression --provider jsonl requires --fixture")
-        provider = load_provider(args.provider, path=args.fixture)
+        provider = load_provider(args.provider, **provider_kwargs(args))
         result = {
             "provider": provider.name,
             **regression_run(store, store.prompts(), provider, args.target),
@@ -179,7 +202,7 @@ def main(argv: list[str] | None = None) -> None:
     elif args.command == "resume":
         if args.provider == "jsonl" and not args.fixture:
             raise SystemExit("resume --provider jsonl requires --fixture")
-        provider = load_provider(args.provider, path=args.fixture)
+        provider = load_provider(args.provider, **provider_kwargs(args))
         result = {
             "provider": provider.name,
             **resume_provider(store, args.run_id, provider),

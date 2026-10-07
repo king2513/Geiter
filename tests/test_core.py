@@ -7,6 +7,7 @@ import geiter
 from geiter.core import GeiterStore
 from geiter.gateway import dispatch
 from geiter.providers import (
+    HttpJsonProvider,
     JsonlProvider,
     ProviderAnswer,
     load_provider,
@@ -317,6 +318,87 @@ class GeiterStoreTests(unittest.TestCase):
         self.assertEqual(observations[0]["data"]["provider"], "replay")
         self.assertEqual(load_provider("jsonl", path=fixture).name, "jsonl")
 
+    def test_http_json_provider_posts_prompt_and_parses_answer(self):
+        from unittest.mock import MagicMock, patch
+        from urllib.request import Request
+
+        response = MagicMock()
+        response.__enter__.return_value = response
+        response.read.return_value = json.dumps({
+            "provider": "remote-fixture",
+            "answer": "Geiter is discoverable.",
+            "citations": ["https://example.test/geiter"],
+        }).encode("utf-8")
+        with patch("geiter.providers.urlopen", return_value=response) as request_call:
+            provider = HttpJsonProvider(
+                "https://provider.test/answer",
+                headers={"Authorization": "Bearer test"},
+                timeout=4,
+            )
+            answer = provider.answer("What is Geiter?")
+
+        request = request_call.call_args.args[0]
+        self.assertIsInstance(request, Request)
+        self.assertEqual(request.get_method(), "POST")
+        self.assertEqual(json.loads(request.data.decode("utf-8")), {"prompt": "What is Geiter?"})
+        self.assertEqual(request.headers["Authorization"], "Bearer test")
+        self.assertEqual(request_call.call_args.kwargs["timeout"], 4.0)
+        self.assertEqual(answer.provider, "remote-fixture")
+        self.assertEqual(answer.citations, ["https://example.test/geiter"])
+
+    def test_http_json_provider_classifies_retryable_and_invalid_responses(self):
+        from unittest.mock import MagicMock, patch
+        from urllib.error import HTTPError
+
+        with patch(
+            "geiter.providers.urlopen",
+            side_effect=HTTPError("https://provider.test", 503, "busy", {}, None),
+        ):
+            with self.assertRaises(ConnectionError):
+                HttpJsonProvider("https://provider.test/answer").answer("retry")
+
+        with patch(
+            "geiter.providers.urlopen",
+            side_effect=HTTPError("https://provider.test", 401, "denied", {}, None),
+        ):
+            with self.assertRaises(ValueError):
+                HttpJsonProvider("https://provider.test/answer").answer("deny")
+
+        with patch("geiter.providers.urlopen") as request_call:
+            response = MagicMock()
+            response.__enter__.return_value = response
+            response.read.return_value = b'{"citations":[]}'
+            request_call.return_value = response
+            with self.assertRaisesRegex(ValueError, "requires a non-empty answer"):
+                HttpJsonProvider("https://provider.test/answer").answer("invalid")
+
+    def test_http_json_provider_requires_safe_endpoint_and_timeout(self):
+        with self.assertRaisesRegex(ValueError, "absolute http"):
+            HttpJsonProvider("file:///etc/passwd")
+        with self.assertRaisesRegex(ValueError, "timeout"):
+            HttpJsonProvider("https://provider.test/answer", timeout=0)
+
+    def test_http_json_credentials_never_enter_state_or_events(self):
+        from unittest.mock import MagicMock, patch
+
+        self.store.init()
+        prompt = self.store.add_prompt("What is Geiter?")
+        response = MagicMock()
+        response.__enter__.return_value = response
+        response.read.return_value = json.dumps({
+            "answer": "Geiter is visible.",
+            "citations": [],
+        }).encode("utf-8")
+        provider = HttpJsonProvider(
+            "https://provider.test/answer",
+            headers={"Authorization": "Bearer secret-token"},
+        )
+        with patch("geiter.providers.urlopen", return_value=response):
+            result = run_provider(self.store, [prompt], provider)
+        serialized = json.dumps(self.store.read()) + json.dumps(self.store.events(limit=100000))
+        self.assertEqual(result["run"]["data"]["status"], "completed")
+        self.assertNotIn("secret-token", serialized)
+
     def test_run_ledger_records_success_and_failure_without_aborting_batch(self):
         self.store.init()
         prompt_a = self.store.add_prompt("What is Geiter?")
@@ -490,6 +572,7 @@ class GeiterStoreTests(unittest.TestCase):
         capabilities = self.store.capabilities()
         self.assertEqual(capabilities["action_queue"]["record_kind"], "agent.action")
         self.assertIn("propose", capabilities["action_queue"]["operations"])
+        self.assertTrue(capabilities["providers"]["built_in"]["http_json"]["network"])
         self.store.claim_action(action["id"], "itr_test")
         active_report = self.store.report()
         self.assertEqual(active_report["open_action_count"], 0)
