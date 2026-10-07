@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.0 - 2026-10-07
+
+- added experiment result ledger with evidence and comparison linkage
+- added explicit completion gate: only approved experiments can record results
+- included experiment summaries and recent learnings in reports
+
 ## 0.7.0 - 2026-10-07
 
 - added baseline snapshots and post-baseline delta comparisons

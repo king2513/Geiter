@@ -50,11 +50,14 @@ def parser() -> argparse.ArgumentParser:
     baseline.add_argument("--id")
     baseline.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
     experiment = commands.add_parser("experiment", help="Propose or approve policy-gated experiments")
-    experiment.add_argument("action", choices=("propose", "approve"))
+    experiment.add_argument("action", choices=("propose", "approve", "result"))
     experiment.add_argument("--id")
     experiment.add_argument("--hypothesis")
     experiment.add_argument("--change")
     experiment.add_argument("--risk", default="low")
+    experiment.add_argument("--outcome", choices=("supported", "rejected", "inconclusive"))
+    experiment.add_argument("--evidence")
+    experiment.add_argument("--baseline-id")
     experiment.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
     commands.add_parser("doctor", help="Validate workspace consistency").add_argument(
         "--json", action="store_true", help=argparse.SUPPRESS
@@ -153,8 +156,13 @@ def main(argv: list[str] | None = None) -> None:
             result = store.propose_experiment(args.hypothesis, args.change, args.risk)
         else:
             if not args.id:
-                raise SystemExit("experiment approve requires --id")
-            result = store.approve_experiment(args.id)
+                raise SystemExit(f"experiment {args.action} requires --id")
+            if args.action == "approve":
+                result = store.approve_experiment(args.id)
+            else:
+                if not args.outcome or not args.evidence:
+                    raise SystemExit("experiment result requires --outcome and --evidence")
+                result = store.record_experiment_result(args.id, args.outcome, args.evidence, args.baseline_id)
     elif args.command == "doctor":
         result = store.doctor()
     elif args.command == "report":

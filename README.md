@@ -22,6 +22,7 @@ Geiter is an agent-native runtime for Generative Engine Optimization (GEO). It g
 - installable provider plugins through `geiter.providers` entry points
 - baseline snapshots and delta comparisons between observation batches
 - policy-gated experiment proposals with explicit approval
+- experiment result ledger linking evidence, comparisons, and learnings
 - zero runtime dependencies; Python 3.10+
 
 ## Quick start
@@ -38,6 +39,7 @@ python -m geiter report --json
 python -m geiter baseline save --label before-change --json
 python -m geiter baseline compare --json
 python -m geiter experiment propose --hypothesis "Improve citation rate" --change "Add authoritative docs" --json
+python -m geiter experiment result --id <experiment-id> --outcome supported --evidence "Citation rate improved" --json
 ```
 
 Replay a deterministic provider batch:

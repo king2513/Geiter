@@ -76,6 +76,20 @@ TOOLS = [
             },
         },
     },
+    {
+        "name": "geiter_record_experiment_result",
+        "description": "Record an approved experiment outcome and comparison evidence.",
+        "inputSchema": {
+            "type": "object",
+            "required": ["experiment_id", "outcome", "evidence"],
+            "properties": {
+                "experiment_id": {"type": "string"},
+                "outcome": {"type": "string", "enum": ["supported", "rejected", "inconclusive"]},
+                "evidence": {"type": "string"},
+                "baseline_id": {"type": "string"},
+            },
+        },
+    },
 ]
 
 RESOURCES = [
@@ -109,7 +123,7 @@ def dispatch(store: GeiterStore, request: dict[str, Any]) -> dict[str, Any] | No
     if method == "initialize":
         return _result(request_id, {
             "protocolVersion": "2025-06-18",
-            "serverInfo": {"name": "geiter", "version": "0.7.0"},
+            "serverInfo": {"name": "geiter", "version": "0.8.0"},
             "capabilities": {"tools": {}},
         })
     if method == "notifications/initialized":
@@ -171,6 +185,10 @@ def dispatch(store: GeiterStore, request: dict[str, Any]) -> dict[str, Any] | No
             value = store.compare(args.get("baseline_id"))
         elif name == "geiter_propose_experiment":
             value = store.propose_experiment(args["hypothesis"], args["change"], args.get("risk", "low"))
+        elif name == "geiter_record_experiment_result":
+            value = store.record_experiment_result(
+                args["experiment_id"], args["outcome"], args["evidence"], args.get("baseline_id")
+            )
         else:
             return _error(request_id, -32602, f"unknown tool: {name}")
     except (KeyError, ValueError) as exc:

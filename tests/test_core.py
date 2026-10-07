@@ -58,6 +58,12 @@ class GeiterStoreTests(unittest.TestCase):
         self.assertEqual(proposal["data"]["status"], "proposed")
         approved = self.store.approve_experiment(proposal["id"])
         self.assertEqual(approved["data"]["status"], "approved")
+        result = self.store.record_experiment_result(
+            proposal["id"], "supported", "Target citation rate remained stable after the change.", baseline["id"]
+        )
+        self.assertEqual(result["kind"], "experiment.result")
+        completed = next(item for item in self.store.read()["experiments"] if item["id"] == proposal["id"])
+        self.assertEqual(completed["data"]["status"], "completed")
 
     def test_compare_without_baseline_is_explicit(self):
         self.store.init()

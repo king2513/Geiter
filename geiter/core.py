@@ -394,6 +394,42 @@ class GeiterStore:
         self.event("experiments.approved", experiment)
         return experiment
 
+    def record_experiment_result(
+        self,
+        experiment_id: str,
+        outcome: str,
+        evidence: str,
+        baseline_id: str | None = None,
+    ) -> dict[str, Any]:
+        if outcome not in {"supported", "rejected", "inconclusive"}:
+            raise ValueError("outcome must be supported, rejected, or inconclusive")
+        state = self.read()
+        experiment = next((item for item in state.get("experiments", []) if item["id"] == experiment_id), None)
+        if experiment is None:
+            raise ValueError(f"unknown experiment id: {experiment_id}")
+        if experiment["data"].get("status") != "approved":
+            raise ValueError("experiment must be approved before recording a result")
+        comparison = self.compare(baseline_id)
+        result = self.add(
+            "learnings",
+            "experiment.result",
+            {
+                "experiment_id": experiment_id,
+                "outcome": outcome,
+                "evidence": evidence.strip(),
+                "comparison": comparison,
+                "recorded_at": now(),
+            },
+        )
+        state = self.read()
+        experiment = next(item for item in state["experiments"] if item["id"] == experiment_id)
+        experiment["data"]["status"] = "completed"
+        experiment["data"]["outcome"] = outcome
+        experiment["data"]["result_id"] = result["id"]
+        self._write(state)
+        self.event("experiments.completed", {"experiment_id": experiment_id, "result_id": result["id"]})
+        return result
+
     @staticmethod
     def _verdict(delta: dict[str, float | None]) -> str:
         values = [value for value in delta.values() if value is not None]
@@ -475,4 +511,6 @@ class GeiterStore:
             "event_count": len(self.events(limit=100000)),
             "baseline_count": len(state.get("baselines", [])),
             "experiment_count": len(state.get("experiments", [])),
+            "experiments": state.get("experiments", []),
+            "latest_learnings": state.get("learnings", [])[-10:],
         }
