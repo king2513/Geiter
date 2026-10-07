@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.18.0 - 2026-10-07
+
+- made regression gates baseline-aware without changing no-baseline compatibility
+- scoped comparison evidence to the current provider run via observation run IDs
+- added explicit `flat`, `mixed`, and `insufficient_data` gate outcomes and typed actions
+- exposed `--baseline-id` through the CLI and `geiter_regression`
+
 ## 1.17.0 - 2026-10-07
 
 - added the zero-dependency opt-in `http_json` live provider adapter

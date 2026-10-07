@@ -670,11 +670,41 @@ class GeiterStore:
     def skip_action(self, action_id: str, evidence: dict[str, Any] | None = None) -> dict[str, Any]:
         return self.resolve_action(action_id, "skipped", evidence)
 
-    def regression_gate(self, run: dict[str, Any]) -> dict[str, Any]:
-        """Evaluate a provider run and workspace health as one machine gate."""
+    def regression_gate(
+        self,
+        run: dict[str, Any],
+        baseline_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Evaluate a provider run, GEO delta, and workspace health as one gate."""
         health = self.health()
         doctor = self.doctor()
         summary = run["data"].get("summary", {})
+        run_observation_ids = {
+            attempt.get("observation_id")
+            for attempt in run["data"].get("attempts", [])
+            if attempt.get("observation_id")
+        }
+        run_observations = [
+            item
+            for item in self.read().get("observations", [])
+            if item.get("kind") == "retrieval.observation"
+            and (
+                item.get("data", {}).get("run_id") == run["id"]
+                or item.get("id") in run_observation_ids
+            )
+        ]
+        unusable_run_observations = [
+            item for item in run_observations
+            if not item.get("data", {}).get("quality", {}).get("usable", True)
+        ]
+        comparison = self.compare(
+            baseline_id,
+            current_run_id=run["id"],
+            current_observation_ids=run_observation_ids,
+        )
+        comparison_status = comparison.get("status")
+        comparison_verdict = comparison.get("verdict")
+        comparison_ok = comparison_status == "no_baseline" or comparison_verdict in {"improved", "flat"}
         checks = [
             {
                 "name": "prompts_present",
@@ -688,13 +718,32 @@ class GeiterStore:
             },
             {
                 "name": "observations_usable",
-                "ok": health["unusable_count"] == 0,
-                "detail": health["unusable_count"],
+                "ok": (
+                    summary.get("succeeded", 0) == len(run_observations)
+                    and not unusable_run_observations
+                ),
+                "detail": {
+                    "run_observation_count": len(run_observations),
+                    "unusable_count": len(unusable_run_observations),
+                    "workspace_unusable_count": health["unusable_count"],
+                },
             },
             {
                 "name": "workspace_consistent",
                 "ok": doctor["ok"],
                 "detail": doctor["next_action"],
+            },
+            {
+                "name": "baseline_comparison",
+                "ok": comparison_ok,
+                "detail": {
+                    "status": comparison_status,
+                    "verdict": comparison_verdict,
+                    "baseline_id": comparison.get("baseline", {}).get("id")
+                    if comparison.get("baseline")
+                    else baseline_id,
+                    "pair_count": comparison.get("pairing", {}).get("pair_count", 0),
+                },
             },
         ]
         failed = [check for check in checks if not check["ok"]]
@@ -702,7 +751,12 @@ class GeiterStore:
             action = {
                 "type": "continue",
                 "priority": "normal",
-                "prompt": "Save the passing run as evidence, then compare the next observation batch.",
+                "prompt": (
+                    "Record the passing GEO run as evidence, then save a new baseline "
+                    "before the next change."
+                    if comparison_status == "compared"
+                    else "Save the passing run as evidence, then compare the next observation batch."
+                ),
             }
         elif not checks[0]["ok"]:
             action = {
@@ -722,18 +776,55 @@ class GeiterStore:
                 "priority": "high",
                 "prompt": "Repair unusable observations before trusting GEO comparisons.",
             }
-        else:
+        elif not checks[3]["ok"]:
             action = {
                 "type": "repair_workspace",
                 "priority": "critical",
                 "prompt": "Run doctor, repair workspace consistency failures, then rerun the regression gate.",
             }
+        elif comparison_verdict == "regressed":
+            action = {
+                "type": "recover_regression",
+                "priority": "high",
+                "prompt": (
+                    "Investigate the GEO regression, restore the weakest metric, "
+                    "then rerun this provider against the same baseline."
+                ),
+            }
+        elif comparison_verdict == "mixed":
+            action = {
+                "type": "investigate_mixed_metrics",
+                "priority": "high",
+                "prompt": (
+                    "Investigate the mixed GEO deltas and isolate the smallest change "
+                    "that improves the losing metric before expanding scope."
+                ),
+            }
+        else:
+            action = {
+                "type": "collect_comparison_evidence",
+                "priority": "high",
+                "prompt": (
+                    "Collect at least two valid prompt/provider pairs after the selected "
+                    "baseline before treating this regression result as directional."
+                ),
+            }
+        evidence = {
+            "run_id": run["id"],
+            "baseline_id": comparison.get("baseline", {}).get("id") if comparison.get("baseline") else baseline_id,
+            "failed_checks": [check["name"] for check in failed],
+            "comparison_status": comparison_status,
+            "comparison_verdict": comparison_verdict,
+            "comparison_delta": comparison.get("delta"),
+        }
         return {
             "schema": "geiter/gate-v1",
             "ok": not failed,
             "run_id": run["id"],
             "provider": run["data"]["provider"],
             "summary": summary,
+            "baseline_id": evidence["baseline_id"],
+            "comparison": comparison,
             "checks": checks,
             "failed_checks": [check["name"] for check in failed],
             "action": action,
@@ -743,12 +834,16 @@ class GeiterStore:
                 action["priority"],
                 source="regression_gate",
                 dedupe_key=f"regression:{run['id']}:{action['type']}",
-                evidence={"run_id": run["id"], "failed_checks": [check["name"] for check in failed]},
+                evidence=evidence,
             ),
             "health": health,
             "doctor": doctor,
             "next_action": "Regression gate passed." if not failed
-            else "Repair failed checks before trusting this regression run.",
+            else (
+                "Repair failed checks before trusting this regression run."
+                if comparison_status != "compared" or comparison_verdict not in {"regressed", "mixed", "insufficient_data"}
+                else f"Comparison verdict is {comparison_verdict}; follow the typed action before proceeding."
+            ),
         }
 
     def add_prompt(self, text: str, intent: str | None = None) -> dict[str, Any]:
@@ -778,13 +873,21 @@ class GeiterStore:
         answer: str,
         citations: list[str] | None = None,
         target: str | None = None,
+        run_id: str | None = None,
     ) -> dict[str, Any]:
         state = self.read()
         prompt = next((item for item in state["prompts"] if item["id"] == prompt_id), None)
         if prompt is None:
             raise ValueError(f"unknown prompt id: {prompt_id}")
+        if run_id is not None:
+            run = next((item for item in state.get("runs", []) if item["id"] == run_id), None)
+            if run is None:
+                raise ValueError(f"unknown run id: {run_id}")
+            if prompt_id not in run["data"].get("prompt_ids", []):
+                raise ValueError(f"prompt {prompt_id} is not part of run {run_id}")
         clean_citations = list(dict.fromkeys(citations or []))
         normalized_answer = answer.strip()
+        answer_sha256 = hashlib.sha256(normalized_answer.encode("utf-8")).hexdigest()
         invalid_citations = [citation for citation in clean_citations if not urlparse(citation).scheme]
         quality = {
             "answer_present": bool(normalized_answer),
@@ -792,7 +895,12 @@ class GeiterStore:
             "duplicate": any(
                 item["data"].get("prompt_id") == prompt_id
                 and item["data"].get("provider") == provider
-                and item["data"].get("answer_sha256") == hashlib.sha256(normalized_answer.encode("utf-8")).hexdigest()
+                and item["data"].get("answer_sha256") == answer_sha256
+                and (
+                    item["data"].get("run_id") == run_id
+                    if run_id is not None
+                    else item["data"].get("run_id") is None
+                )
                 for item in state.get("observations", [])
                 if item.get("kind") == "retrieval.observation"
             ),
@@ -823,28 +931,31 @@ class GeiterStore:
                 and target_text in parsed.netloc.casefold()
             ):
                 positions.append(index)
+        observation_data = {
+            "prompt_id": prompt_id,
+            "prompt": prompt["data"]["text"],
+            "provider": provider,
+            "answer": normalized_answer,
+            "answer_sha256": answer_sha256,
+            "citations": clean_citations,
+            "quality": quality,
+            "target": target or state["identity"]["name"],
+            "metrics": {
+                "mention": int(mention),
+                "citation": int(bool(clean_citations)),
+                "target_citation": int(bool(positions)),
+                "citation_position": positions[0] + 1 if positions else None,
+                "citation_reciprocal_rank": round(1 / (positions[0] + 1), 4) if positions else 0.0,
+                "citation_count": len(clean_citations),
+            },
+        }
+        if run_id is not None:
+            observation_data["run_id"] = run_id
         record = Record(
             uid("obs"),
             now(),
             "retrieval.observation",
-            {
-                "prompt_id": prompt_id,
-                "prompt": prompt["data"]["text"],
-                "provider": provider,
-                "answer": normalized_answer,
-                "answer_sha256": hashlib.sha256(normalized_answer.encode("utf-8")).hexdigest(),
-                "citations": clean_citations,
-                "quality": quality,
-                "target": target or state["identity"]["name"],
-                "metrics": {
-                    "mention": int(mention),
-                    "citation": int(bool(clean_citations)),
-                    "target_citation": int(bool(positions)),
-                    "citation_position": positions[0] + 1 if positions else None,
-                    "citation_reciprocal_rank": round(1 / (positions[0] + 1), 4) if positions else 0.0,
-                    "citation_count": len(clean_citations),
-                },
-            },
+            observation_data,
         ).to_dict()
         state["observations"].append(record)
         state["measurements"].append({
@@ -956,7 +1067,12 @@ class GeiterStore:
         self.event("baselines.saved", baseline)
         return baseline
 
-    def compare(self, baseline_id: str | None = None) -> dict[str, Any]:
+    def compare(
+        self,
+        baseline_id: str | None = None,
+        current_run_id: str | None = None,
+        current_observation_ids: set[str] | None = None,
+    ) -> dict[str, Any]:
         state = self.read()
         baselines = state.get("baselines", [])
         if not baselines:
@@ -969,11 +1085,26 @@ class GeiterStore:
         baseline_observation_ids = set(baseline["data"].get("observation_ids", []))
         current_observations = [
             item for item in state.get("observations", [])
-            if item["kind"] == "retrieval.observation" and item["id"] not in baseline_observation_ids
+            if item["kind"] == "retrieval.observation"
+            and item["id"] not in baseline_observation_ids
+            and (
+                (
+                    item["id"] in current_observation_ids
+                    and item["data"].get("quality", {}).get("usable", True)
+                )
+                if current_observation_ids is not None
+                else current_run_id is None
+                or (
+                    item["data"].get("run_id") == current_run_id
+                    and item["data"].get("quality", {}).get("usable", True)
+                )
+            )
         ]
         baseline_observations = [
             item for item in state.get("observations", [])
-            if item["kind"] == "retrieval.observation" and item["id"] in baseline_observation_ids
+            if item["kind"] == "retrieval.observation"
+            and item["id"] in baseline_observation_ids
+            and item["data"].get("quality", {}).get("usable", True)
         ]
         def group(items):
             grouped = {}
@@ -1003,6 +1134,10 @@ class GeiterStore:
             "schema": "geiter/comparison-v1",
             "status": "compared",
             "baseline": baseline,
+            "scope": {
+                "current_run_id": current_run_id,
+                "current_observation_count": len(current_observations),
+            },
             "baseline_paired": before_analysis,
             "current": current,
             "pairing": {"pair_count": len(pairs), "minimum_pairs": 2, "pairs": pairs},
@@ -1117,6 +1252,8 @@ class GeiterStore:
         values = [value for value in delta.values() if value is not None]
         if not values:
             return "insufficient_data"
+        if all(value == 0 for value in values):
+            return "flat"
         if all(value >= 0 for value in values) and any(value > 0 for value in values):
             return "improved"
         if all(value <= 0 for value in values) and any(value < 0 for value in values):

@@ -47,6 +47,7 @@ TOOLS = [
                 "answer": {"type": "string"},
                 "citations": {"type": "array", "items": {"type": "string"}},
                 "target": {"type": "string"},
+                "run_id": {"type": "string"},
             },
         },
     },
@@ -174,6 +175,7 @@ TOOLS = [
                 "endpoint": {"type": "string"},
                 "headers": {"type": "object", "additionalProperties": {"type": "string"}},
                 "timeout": {"type": "number"},
+                "baseline_id": {"type": "string"},
             },
         },
     },
@@ -329,7 +331,7 @@ def dispatch(store: GeiterStore, request: dict[str, Any]) -> dict[str, Any] | No
         elif name == "geiter_record_observation":
             value = store.record_observation(
                 args["prompt_id"], args["provider"], args["answer"],
-                args.get("citations", []), args.get("target"),
+                args.get("citations", []), args.get("target"), args.get("run_id"),
             )
         elif name == "geiter_analyze":
             value = store.analyze()
@@ -393,6 +395,7 @@ def dispatch(store: GeiterStore, request: dict[str, Any]) -> dict[str, Any] | No
                     store.prompts(),
                     load_provider(provider_name, **provider_kwargs(args)),
                     args.get("target"),
+                    args.get("baseline_id"),
                 ),
             }
         elif name == "geiter_matrix":

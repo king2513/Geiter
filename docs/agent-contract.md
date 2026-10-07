@@ -10,7 +10,7 @@ goal add <text> --json
 memory add <kind> <text> --json
 prompt add <text> [--intent <intent>] --json
 prompt list --json
-observe <prompt-id> --provider <name> --answer <text> [--citation <url>] --json
+observe <prompt-id> --provider <name> --answer <text> [--citation <url>] [--run-id <run-id>] --json
 analyze --json
 health --json
 matrix --json
@@ -19,8 +19,8 @@ report --json
 context --json
 run --provider jsonl --fixture <path> --json
 run --provider http_json --endpoint <url> [--header "Name: value"] [--timeout <seconds>] --json
-regression --provider jsonl --fixture <path> --json
-regression --provider http_json --endpoint <url> [--header "Name: value"] [--timeout <seconds>] --json
+regression --provider jsonl --fixture <path> [--baseline-id <baseline-id>] --json
+regression --provider http_json --endpoint <url> [--header "Name: value"] [--timeout <seconds>] [--baseline-id <baseline-id>] --json
 resume <run-id> --provider jsonl --fixture <path> --json
 resume <run-id> --provider http_json --endpoint <url> [--header "Name: value"] [--timeout <seconds>] --json
 connect [--format <generic|claude|cursor|vscode>] --json
@@ -58,7 +58,13 @@ events or mutate workspace state.
 capability document, including version, schemas, transport, and entrypoints.
 `geiter_regression` runs the configured prompts against a provider and returns
 a `geiter/gate-v1` payload containing an `ok` boolean, named checks, failed
-check names, and a typed next-step `action`.
+check names, a baseline-scoped `comparison`, and a typed next-step `action`.
+Its optional `baseline_id` selects the comparison baseline; if omitted, the
+newest baseline is used when available. Observations created by the run carry
+its `run_id`, so the gate never mixes another post-baseline run into the
+current comparison. `improved` and `flat` verdicts pass. `regressed`,
+`mixed`, and `insufficient_data` fail with typed actions; `no_baseline` keeps
+the pre-1.18 run-quality behavior and is explicitly reported.
 The gate action is also persisted as an `agent.action` record. `iterate`
 claims the highest-priority open action and records it in the iteration trace;
 claiming does not imply that external work was completed.
@@ -134,8 +140,9 @@ commit as fixtures and compare across Geiter versions.
 Baselines snapshot the current analysis. A comparison analyzes only observations
 recorded after the selected baseline, so repeated observations cannot masquerade
 as improvement. Comparisons pair observations by prompt and provider, and only
-emit a directional verdict after at least two pairs; otherwise the verdict is
-`insufficient_data`. Experiments are proposals by default; approval only changes the
+emit a directional verdict after at least two valid pairs; otherwise the verdict
+is `insufficient_data`. A regression gate scopes those pairs to its current run,
+and accepts only `improved` or `flat`. Experiments are proposals by default; approval only changes the
 local record and refuses experiments marked with external side effects.
 An approved experiment can be completed with a structured result, which writes
 an `experiment.result` learning containing the selected comparison and evidence.

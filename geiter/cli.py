@@ -35,6 +35,7 @@ def parser() -> argparse.ArgumentParser:
     observe.add_argument("--answer", required=True)
     observe.add_argument("--citation", action="append", default=[])
     observe.add_argument("--target")
+    observe.add_argument("--run-id")
     observe.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
 
     run = commands.add_parser("run", help="Run a provider across all prompts")
@@ -53,6 +54,7 @@ def parser() -> argparse.ArgumentParser:
     regression.add_argument("--header", action="append", default=[], help="HTTP header in 'Name: value' form")
     regression.add_argument("--timeout", type=float, default=30, help="HTTP provider timeout in seconds")
     regression.add_argument("--target")
+    regression.add_argument("--baseline-id")
     regression.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
     resume = commands.add_parser("resume", help="Resume a provider run from its durable ledger")
     resume.add_argument("run_id")
@@ -182,6 +184,7 @@ def main(argv: list[str] | None = None) -> None:
             args.answer,
             args.citation,
             args.target,
+            args.run_id,
         )
     elif args.command == "run":
         if args.provider == "jsonl" and not args.fixture:
@@ -197,7 +200,7 @@ def main(argv: list[str] | None = None) -> None:
         provider = load_provider(args.provider, **provider_kwargs(args))
         result = {
             "provider": provider.name,
-            **regression_run(store, store.prompts(), provider, args.target),
+            **regression_run(store, store.prompts(), provider, args.target, args.baseline_id),
         }
     elif args.command == "resume":
         if args.provider == "jsonl" and not args.fixture:

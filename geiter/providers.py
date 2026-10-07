@@ -162,7 +162,12 @@ def observe_prompts(store, prompts: Iterable[dict], provider: Provider, target: 
         try:
             response = provider.answer(prompt["data"]["text"])
             observation = store.record_observation(
-                prompt["id"], response.provider, response.answer, response.citations, target
+                prompt["id"],
+                response.provider,
+                response.answer,
+                response.citations,
+                target,
+                run_id=run_id,
             )
             results.append(observation)
             if run_id:
@@ -240,12 +245,18 @@ def resume_provider(store, run_id: str, provider: Provider) -> dict:
     }
 
 
-def regression_run(store, prompts: Iterable[dict], provider: Provider, target: str | None = None) -> dict:
+def regression_run(
+    store,
+    prompts: Iterable[dict],
+    provider: Provider,
+    target: str | None = None,
+    baseline_id: str | None = None,
+) -> dict:
     """Run a provider batch and return its machine-readable quality gate."""
     result = run_provider(store, prompts, provider, target, max_attempts=1)
     return {
         **result,
-        "gate": store.regression_gate(result["run"]),
+        "gate": store.regression_gate(result["run"], baseline_id),
     }
 
 

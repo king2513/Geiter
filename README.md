@@ -76,6 +76,9 @@ Replay a deterministic provider batch:
 python -m geiter prompt add "What is Geiter?" --intent discovery
 python -m geiter run --provider jsonl --fixture examples/answers.jsonl --json
 python -m geiter regression --provider jsonl --fixture examples/answers.jsonl --json
+# Compare this run with an explicit baseline.
+python -m geiter regression --provider jsonl --fixture examples/answers.jsonl \
+  --baseline-id <baseline-id> --json
 # Continue a run after a process interruption.
 python -m geiter resume <run-id> --provider jsonl --fixture examples/answers.jsonl --json
 ```
@@ -169,8 +172,15 @@ state or event ledger.
 
 `regression` runs a fixture against all configured prompts and returns a
 `geiter/gate-v1` object with an `ok` boolean, named checks, health diagnostics,
-the run ID, and a typed `action` for the next step. Agents and CI can use this
-as a single pass/fail contract without interpreting prose.
+the run ID, a baseline-scoped comparison, and a typed `action` for the next
+step. Pass `--baseline-id` to select a baseline; when omitted, the newest
+baseline is used if one exists. The gate keeps the current run's observations
+separate from other post-baseline runs. `improved` and `flat` comparisons pass;
+`regressed`, `mixed`, and `insufficient_data` produce a failing gate with an
+action that tells the next agent what evidence or repair is required. Without
+a baseline, the original run-quality gate remains compatible and reports
+`comparison.status = no_baseline`. Agents and CI can use this as a single
+machine-readable contract without interpreting prose.
 
 `geiter://capabilities` is the stable discovery surface for agents: it reports
 the version, state and report schemas, transport, entrypoints, and operating

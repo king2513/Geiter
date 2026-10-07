@@ -7,6 +7,7 @@ import geiter
 from geiter.core import GeiterStore
 from geiter.gateway import dispatch
 from geiter.providers import (
+    FixtureProvider,
     HttpJsonProvider,
     JsonlProvider,
     ProviderAnswer,
@@ -496,6 +497,11 @@ class GeiterStoreTests(unittest.TestCase):
         listed = dispatch(self.store, {"jsonrpc": "2.0", "id": 11, "method": "tools/list"})
         names = {tool["name"] for tool in listed["result"]["content"][0]["json"]["tools"]}
         self.assertIn("geiter_resume", names)
+        tools = listed["result"]["content"][0]["json"]["tools"]
+        regression_schema = next(tool for tool in tools if tool["name"] == "geiter_regression")["inputSchema"]
+        resume_schema = next(tool for tool in tools if tool["name"] == "geiter_resume")["inputSchema"]
+        self.assertIn("baseline_id", regression_schema["properties"])
+        self.assertNotIn("baseline_id", resume_schema["properties"])
         response = dispatch(self.store, {
             "jsonrpc": "2.0",
             "id": 12,
@@ -542,6 +548,102 @@ class GeiterStoreTests(unittest.TestCase):
         self.assertFalse(checks["prompts_present"])
         self.assertEqual(result["gate"]["action"]["type"], "add_prompts")
         self.assertEqual(result["gate"]["action_record"]["data"]["status"], "open")
+
+    def test_regression_gate_compares_only_the_current_run_and_accepts_flat(self):
+        self.store.init()
+        prompt_a = self.store.add_prompt("What is Geiter?")
+        prompt_b = self.store.add_prompt("Why use Geiter?")
+        answer = "Geiter is an agent-native GEO runtime."
+        citations = ["https://geiter.dev/docs"]
+        self.store.record_observation(prompt_a["id"], "fixture", answer, citations)
+        self.store.record_observation(prompt_b["id"], "fixture", answer, citations)
+        baseline = self.store.save_baseline("before")
+
+        older_run = self.store.start_run("fixture", [prompt_a["id"], prompt_b["id"]])
+        self.store.record_observation(prompt_a["id"], "fixture", answer, citations, run_id=older_run["id"])
+        self.store.record_observation(prompt_b["id"], "fixture", answer, citations, run_id=older_run["id"])
+        self.store.finish_run(older_run["id"])
+
+        provider = FixtureProvider({
+            prompt_a["data"]["text"]: ProviderAnswer("fixture", answer, citations),
+            prompt_b["data"]["text"]: ProviderAnswer("fixture", answer, citations),
+        })
+        result = regression_run(
+            self.store,
+            self.store.prompts(),
+            provider,
+            baseline_id=baseline["id"],
+        )
+        gate = result["gate"]
+        self.assertTrue(gate["ok"])
+        self.assertEqual(gate["comparison"]["verdict"], "flat")
+        self.assertEqual(gate["comparison"]["scope"]["current_run_id"], result["run"]["id"])
+        self.assertEqual(gate["comparison"]["scope"]["current_observation_count"], 2)
+        self.assertEqual(gate["action"]["type"], "continue")
+        self.assertTrue(all(
+            item["data"].get("run_id") == result["run"]["id"]
+            for item in result["observations"]
+        ))
+
+    def test_regression_gate_rejects_a_geo_regression(self):
+        self.store.init()
+        prompt_a = self.store.add_prompt("What is Geiter?")
+        prompt_b = self.store.add_prompt("Why use Geiter?")
+        baseline_answer = "Geiter is an agent-native GEO runtime."
+        for prompt in (prompt_a, prompt_b):
+            self.store.record_observation(
+                prompt["id"],
+                "fixture",
+                baseline_answer,
+                ["https://geiter.dev/docs"],
+            )
+        baseline = self.store.save_baseline("before")
+        degraded = "A generic answer without the target entity."
+        provider = FixtureProvider({
+            prompt_a["data"]["text"]: ProviderAnswer("fixture", degraded, ["https://other.test"]),
+            prompt_b["data"]["text"]: ProviderAnswer("fixture", degraded, ["https://other.test"]),
+        })
+        result = regression_run(
+            self.store,
+            self.store.prompts(),
+            provider,
+            baseline_id=baseline["id"],
+        )
+        gate = result["gate"]
+        self.assertFalse(gate["ok"])
+        self.assertEqual(gate["comparison"]["verdict"], "regressed")
+        self.assertIn("baseline_comparison", gate["failed_checks"])
+        self.assertEqual(gate["action"]["type"], "recover_regression")
+        self.assertEqual(gate["action"]["priority"], "high")
+
+    def test_regression_gate_requires_enough_pairs_for_a_directional_verdict(self):
+        self.store.init()
+        prompt_a = self.store.add_prompt("What is Geiter?")
+        prompt_b = self.store.add_prompt("Why use Geiter?")
+        answer = "Geiter is an agent-native GEO runtime."
+        self.store.record_observation(prompt_a["id"], "fixture", answer, ["https://geiter.dev/docs"])
+        self.store.record_observation(prompt_b["id"], "fixture", answer, ["https://geiter.dev/docs"])
+        baseline = self.store.save_baseline("before")
+        provider = FixtureProvider({
+            prompt_a["data"]["text"]: ProviderAnswer("fixture", answer, ["https://geiter.dev/docs"]),
+            prompt_b["data"]["text"]: ProviderAnswer("fixture", answer, ["https://geiter.dev/docs"]),
+        })
+        original_prompts = self.store.prompts
+        self.store.prompts = lambda: [prompt_a]
+        try:
+            result = regression_run(
+                self.store,
+                self.store.prompts(),
+                provider,
+                baseline_id=baseline["id"],
+            )
+        finally:
+            self.store.prompts = original_prompts
+        gate = result["gate"]
+        self.assertFalse(gate["ok"])
+        self.assertEqual(gate["comparison"]["verdict"], "insufficient_data")
+        self.assertEqual(gate["action"]["type"], "collect_comparison_evidence")
+        self.assertIn("baseline_comparison", gate["failed_checks"])
 
     def test_persisted_actions_dedupe_sort_and_complete_idempotently(self):
         self.store.init()
