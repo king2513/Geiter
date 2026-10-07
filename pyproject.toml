@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "geiter"
+version = "0.2.0"
+description = "An agent-native self-iteration runtime for Generative Engine Optimization"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [{name = "Geiter contributors"}]
+
+[project.scripts]
+geiter = "geiter.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["geiter*"]
