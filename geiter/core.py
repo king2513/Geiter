@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import time
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -245,6 +246,9 @@ class GeiterStore:
         status: str,
         observation_id: str | None = None,
         error: str | None = None,
+        duration_ms: int | None = None,
+        error_type: str | None = None,
+        retryable: bool | None = None,
     ) -> dict[str, Any]:
         state = self.read()
         run = next((item for item in state.get("runs", []) if item["id"] == run_id), None)
@@ -252,9 +256,13 @@ class GeiterStore:
             raise ValueError(f"unknown run id: {run_id}")
         attempt = {
             "prompt_id": prompt_id,
+            "attempt_number": sum(item["prompt_id"] == prompt_id for item in run["data"]["attempts"]) + 1,
             "status": status,
             "observation_id": observation_id,
             "error": error,
+            "error_type": error_type,
+            "retryable": retryable,
+            "duration_ms": duration_ms,
             "at": now(),
         }
         run["data"]["attempts"].append(attempt)
@@ -298,6 +306,8 @@ class GeiterStore:
         for prompt_id in run["data"]["prompt_ids"]:
             history = [item for item in attempts if item["prompt_id"] == prompt_id]
             if any(item["status"] == "succeeded" for item in history):
+                continue
+            if history and history[-1].get("retryable") is False:
                 continue
             if len(history) < run["data"]["max_attempts"]:
                 prompt_ids.append(prompt_id)
@@ -431,6 +441,17 @@ class GeiterStore:
             bucket["invalid"] += int(not quality.get("citations_valid", True) or not quality.get("answer_present", True))
         for bucket in providers.values():
             bucket["usable_rate"] = round(bucket["usable"] / bucket["observations"], 4) if bucket["observations"] else 0.0
+        run_failures: dict[str, dict[str, int]] = {}
+        for run in state.get("runs", []):
+            provider = run["data"]["provider"]
+            bucket = run_failures.setdefault(provider, {"failed": 0, "retryable": 0, "non_retryable": 0})
+            for attempt in run["data"].get("attempts", []):
+                if attempt["status"] == "failed":
+                    bucket["failed"] += 1
+                    bucket["retryable"] += int(attempt.get("retryable") is True)
+                    bucket["non_retryable"] += int(attempt.get("retryable") is False)
+        for provider, bucket in providers.items():
+            bucket["run_failures"] = run_failures.get(provider, {"failed": 0, "retryable": 0, "non_retryable": 0})
         unusable = sum(item["observations"] - item["usable"] for item in providers.values())
         return {
             "schema": "geiter/health-v1",

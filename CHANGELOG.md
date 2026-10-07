@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.5.0 - 2026-10-07
+
+- added attempt numbers and duration metadata
+- classified provider errors as retryable or non-retryable
+- stopped retrying configuration/value failures
+- included failure classes in provider health summaries
+
 ## 1.4.0 - 2026-10-07
 
 - added bounded retries for failed provider prompts

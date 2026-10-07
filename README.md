@@ -19,6 +19,7 @@ Geiter is an agent-native runtime for Generative Engine Optimization (GEO). It g
 - direction-safe reciprocal-rank citation signal and paired comparisons
 - observation/provider health checks that filter unusable evidence
 - provider run ledger with per-prompt success/failure attempts
+- structured attempt timing, error classes, and retryability decisions
 - stdio JSON-RPC gateway with tools and resources
 - `doctor` consistency checks and `report` snapshots
 - replayable JSONL provider runs

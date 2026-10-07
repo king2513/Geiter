@@ -203,6 +203,9 @@ class GeiterStoreTests(unittest.TestCase):
         )
         self.assertEqual(len(result["observations"]), 1)
         self.assertIn("TimeoutError", result["run"]["data"]["attempts"][1]["error"])
+        self.assertEqual(result["run"]["data"]["attempts"][1]["error_type"], "TimeoutError")
+        self.assertTrue(result["run"]["data"]["attempts"][1]["retryable"])
+        self.assertIsInstance(result["run"]["data"]["attempts"][0]["duration_ms"], int)
 
     def test_run_retries_only_failures_and_never_duplicates_success(self):
         self.store.init()
@@ -224,6 +227,23 @@ class GeiterStoreTests(unittest.TestCase):
         self.assertEqual(result["run"]["data"]["status"], "completed")
         self.assertEqual(result["run"]["data"]["summary"]["succeeded"], 2)
         self.assertEqual(len(self.store.read()["observations"]), 2)
+        attempts = result["run"]["data"]["attempts"]
+        self.assertEqual([item["attempt_number"] for item in attempts], [1, 1, 2])
+
+    def test_non_retryable_errors_stop_retry_schedule(self):
+        self.store.init()
+        prompt = self.store.add_prompt("What is Geiter?")
+
+        class InvalidProvider:
+            name = "invalid"
+
+            def answer(self, _prompt):
+                raise ValueError("bad configuration")
+
+        result = run_provider(self.store, [prompt], InvalidProvider(), max_attempts=3)
+        self.assertEqual(len(result["run"]["data"]["attempts"]), 1)
+        self.assertEqual(result["run"]["data"]["attempts"][0]["retryable"], False)
+        self.assertEqual(result["run"]["data"]["summary"]["exhausted"], 0)
 
     def test_gateway_exposes_resources(self):
         self.store.init()

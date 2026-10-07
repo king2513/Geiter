@@ -7,6 +7,7 @@ fixtures so an agent can replay and compare observations without credentials.
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from importlib.metadata import entry_points
@@ -83,6 +84,7 @@ def observe_prompts(store, prompts: Iterable[dict], provider: Provider, target: 
     """Run a provider over prompts and persist successes and failures."""
     results = []
     for prompt in prompts:
+        started = time.perf_counter()
         try:
             response = provider.answer(prompt["data"]["text"])
             observation = store.record_observation(
@@ -90,10 +92,26 @@ def observe_prompts(store, prompts: Iterable[dict], provider: Provider, target: 
             )
             results.append(observation)
             if run_id:
-                store.record_run_attempt(run_id, prompt["id"], "succeeded", observation["id"])
+                store.record_run_attempt(
+                    run_id,
+                    prompt["id"],
+                    "succeeded",
+                    observation["id"],
+                    duration_ms=round((time.perf_counter() - started) * 1000),
+                )
         except Exception as exc:
             if run_id:
-                store.record_run_attempt(run_id, prompt["id"], "failed", error=f"{type(exc).__name__}: {exc}")
+                error_type = type(exc).__name__
+                retryable = isinstance(exc, (TimeoutError, ConnectionError, OSError))
+                store.record_run_attempt(
+                    run_id,
+                    prompt["id"],
+                    "failed",
+                    error=f"{error_type}: {exc}",
+                    duration_ms=round((time.perf_counter() - started) * 1000),
+                    error_type=error_type,
+                    retryable=retryable,
+                )
     return results
 
 

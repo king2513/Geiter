@@ -64,6 +64,9 @@ observations remain in the audit log but are excluded from GEO aggregates.
 `completed` only when every prompt succeeds; otherwise it is `partial`.
 `--max-attempts` bounds retries. `summary.exhausted` counts prompts that still
 failed after reaching that bound.
+Each attempt also exposes `attempt_number`, `duration_ms`, `error_type`, and
+`retryable`. Timeout, connection, and OS failures are retryable by default;
+configuration/value failures are recorded without blind retries.
 `geiter_runs` exposes recent ledgers to agent callers.
 
 Provider adapters implement one small contract:
