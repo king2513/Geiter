@@ -137,17 +137,50 @@ class GeiterStore:
         iteration_id = uid("itr")
         observation = self.inspect()
         comparison = self.compare()
+        latest_gate = self._latest_gate(state)
         queued_actions = self.list_actions()
         active_action = self.claim_action(queued_actions[0]["id"], iteration_id) if queued_actions else None
+        if latest_gate and not latest_gate.get("ok") and active_action is None:
+            gate_action = latest_gate.get("action", {})
+            active_action = self.propose_action(
+                gate_action.get("type", "resolve_regression_gate"),
+                gate_action.get("prompt", "Resolve the latest failed regression gate."),
+                gate_action.get("priority", "high"),
+                source="regression_gate",
+                dedupe_key=f"regression:{latest_gate.get('run_id')}:{gate_action.get('type', 'resolve_regression_gate')}",
+                evidence={
+                    "run_id": latest_gate.get("run_id"),
+                    "baseline_id": latest_gate.get("baseline_id"),
+                    "failed_checks": latest_gate.get("failed_checks", []),
+                    "reopened_by_iteration": iteration_id,
+                },
+            )
+            active_action = self.claim_action(active_action["id"], iteration_id)
+        gate_action_reopened = bool(
+            latest_gate
+            and not latest_gate.get("ok")
+            and active_action
+            and active_action.get("data", {}).get("evidence", {}).get("reopened_by_iteration")
+        )
         pending_experiments = [
             item for item in state.get("experiments", [])
             if item["data"].get("status") == "approved"
         ]
         if not hypothesis:
-            if active_action:
+            if gate_action_reopened:
+                hypothesis = (
+                    f"Resolve failed regression gate for run {latest_gate.get('run_id')}: "
+                    f"{latest_gate.get('next_action') or 'repair the failed gate checks'}"
+                )
+            elif active_action:
                 hypothesis = (
                     f"Advance queued action {active_action['id']}: "
                     f"{active_action['data']['prompt']}"
+                )
+            elif latest_gate and not latest_gate.get("ok"):
+                hypothesis = (
+                    f"Resolve failed regression gate for run {latest_gate.get('run_id')}: "
+                    f"{latest_gate.get('next_action') or 'repair the failed gate checks'}"
                 )
             elif pending_experiments:
                 hypothesis = (
@@ -174,6 +207,10 @@ class GeiterStore:
                 "description": "Persist the hypothesis and make it available to the next agent.",
                 "comparison_status": comparison.get("status"),
                 "comparison_verdict": comparison.get("verdict"),
+                "gate_run_id": latest_gate.get("run_id") if latest_gate else None,
+                "gate_ok": latest_gate.get("ok") if latest_gate else None,
+                "gate_comparison_status": latest_gate.get("comparison_status") if latest_gate else None,
+                "gate_comparison_verdict": latest_gate.get("comparison_verdict") if latest_gate else None,
                 "pending_experiment_ids": [item["id"] for item in pending_experiments],
                 "active_action_id": active_action["id"] if active_action else None,
                 "active_action_status": active_action["data"]["status"] if active_action else None,
@@ -197,7 +234,12 @@ class GeiterStore:
             {
                 "iteration_id": iteration_id,
                 "text": "The loop is useful when each decision leaves typed evidence behind.",
-                "next_prompt": self._next_prompt(comparison, pending_experiments, active_action),
+                "next_prompt": self._next_prompt(
+                    comparison,
+                    pending_experiments,
+                    active_action,
+                    latest_gate,
+                ),
             },
         )
         result = {
@@ -209,6 +251,7 @@ class GeiterStore:
             "active_action": active_action,
             "recovered_actions": recovered_actions,
             "comparison": comparison,
+            "latest_gate": latest_gate,
             "measurement": measurement,
             "learning": learning,
         }
@@ -223,9 +266,15 @@ class GeiterStore:
         comparison: dict[str, Any],
         pending_experiments: list[dict[str, Any]],
         active_action: dict[str, Any] | None = None,
+        latest_gate: dict[str, Any] | None = None,
     ) -> str:
         if active_action:
             return active_action["data"]["prompt"]
+        if latest_gate and not latest_gate.get("ok"):
+            return latest_gate.get("action", {}).get(
+                "prompt",
+                "Resolve the latest failed regression gate before expanding scope.",
+            )
         if pending_experiments:
             return "Collect post-change observations and record the approved experiment result."
         if comparison.get("status") == "no_baseline":
@@ -424,6 +473,8 @@ class GeiterStore:
                 "statuses": ["open", "in_progress", "completed", "skipped"],
                 "virtual_filters": ["stale"],
                 "operations": ["list", "propose", "complete", "skip", "reclaim"],
+                "resolution_evidence_required": True,
+                "resolution_evidence_rule": "at least one non-empty scalar value",
                 "ordering": "priority_then_created_at",
                 "resolution_outcomes": ["completed", "skipped"],
                 "active_status": "in_progress",
@@ -673,6 +724,13 @@ class GeiterStore:
             raise ValueError(f"unsupported action outcome: {outcome}")
         if action["data"].get("status") in {"completed", "skipped"}:
             return action
+        if not isinstance(evidence, dict) or not any(
+            isinstance(value, (str, int, float, bool)) and (
+                not isinstance(value, str) or bool(value.strip())
+            )
+            for value in evidence.values()
+        ):
+            raise ValueError("action resolution requires non-empty evidence")
         action["data"]["status"] = outcome
         action["data"]["resolved_at"] = now()
         action["data"]["resolution"] = outcome
@@ -1395,17 +1453,7 @@ class GeiterStore:
         state = self.read()
         analysis = self.analyze()
         doctor = self.doctor()
-        gated_runs = [
-            item for item in state.get("runs", [])
-            if item.get("data", {}).get("gate")
-        ]
-        latest_gate = (
-            max(
-                gated_runs,
-                key=lambda item: item["data"]["gate"].get("generated_at", item["created_at"]),
-            )["data"]["gate"]
-            if gated_runs else None
-        )
+        latest_gate = self._latest_gate(state)
         return {
             "schema": "geiter/report-v1",
             "generated_at": now(),
@@ -1453,3 +1501,16 @@ class GeiterStore:
             "action": gate.get("action"),
             "next_action": gate.get("next_action"),
         }
+
+    @staticmethod
+    def _latest_gate(state: dict[str, Any]) -> dict[str, Any] | None:
+        gated_runs = [
+            item for item in state.get("runs", [])
+            if item.get("data", {}).get("gate")
+        ]
+        if not gated_runs:
+            return None
+        return max(
+            (item["data"]["gate"] for item in gated_runs),
+            key=lambda gate: gate.get("generated_at", ""),
+        )

@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.20.0 - 2026-10-08
+
+- made autonomous iteration prioritize unresolved failed regression gates
+- recorded the latest gate verdict in every iteration trace
+- required non-empty auditable evidence when completing or skipping an action
+- exposed the action resolution evidence rule in capabilities and gateway schemas
+
 ## 1.19.0 - 2026-10-08
 
 - rejected unknown baseline IDs instead of silently comparing against the newest baseline

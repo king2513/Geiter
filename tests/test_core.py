@@ -50,6 +50,38 @@ class GeiterStoreTests(unittest.TestCase):
         self.assertEqual(result["comparison"]["status"], "no_baseline")
         self.assertIn("Save a baseline", result["learning"]["data"]["next_prompt"])
 
+    def test_iteration_uses_latest_failed_gate_after_gate_action_is_resolved(self):
+        self.store.init()
+        self.store.add_prompt("What is Geiter?")
+        result = regression_run(
+            self.store,
+            self.store.prompts(),
+            load_provider("fixture"),
+            baseline_id="baseline_missing",
+        )
+        self.store.complete_action(
+            result["gate"]["action_record"]["id"],
+            {"verified": "selected a valid baseline"},
+        )
+
+        iteration = self.store.iterate()
+        data = iteration["action"]["data"]
+        self.assertEqual(iteration["latest_gate"]["run_id"], result["run"]["id"])
+        self.assertFalse(iteration["latest_gate"]["ok"])
+        self.assertEqual(iteration["hypothesis"]["data"]["text"].split(":")[0],
+                         f"Resolve failed regression gate for run {result['run']['id']}")
+        self.assertEqual(data["gate_run_id"], result["run"]["id"])
+        self.assertFalse(data["gate_ok"])
+        self.assertIn("baseline", iteration["learning"]["data"]["next_prompt"])
+        self.assertEqual(
+            iteration["active_action"]["data"]["status"],
+            "in_progress",
+        )
+        self.assertEqual(
+            iteration["active_action"]["data"]["evidence"]["run_id"],
+            result["run"]["id"],
+        )
+
     def test_iteration_claims_highest_priority_action_and_leaves_resolution_open(self):
         self.store.init()
         normal = self.store.propose_action("review", "Review evidence")
@@ -515,8 +547,12 @@ class GeiterStoreTests(unittest.TestCase):
         tools = listed["result"]["content"][0]["json"]["tools"]
         regression_schema = next(tool for tool in tools if tool["name"] == "geiter_regression")["inputSchema"]
         resume_schema = next(tool for tool in tools if tool["name"] == "geiter_resume")["inputSchema"]
+        complete_schema = next(tool for tool in tools if tool["name"] == "geiter_complete_action")["inputSchema"]
+        skip_schema = next(tool for tool in tools if tool["name"] == "geiter_skip_action")["inputSchema"]
         self.assertIn("baseline_id", regression_schema["properties"])
         self.assertNotIn("baseline_id", resume_schema["properties"])
+        self.assertIn("evidence", complete_schema["required"])
+        self.assertIn("evidence", skip_schema["required"])
         response = dispatch(self.store, {
             "jsonrpc": "2.0",
             "id": 12,
@@ -704,6 +740,17 @@ class GeiterStoreTests(unittest.TestCase):
             self.store.propose_action("", "A useful prompt")
         with self.assertRaisesRegex(ValueError, "prompt"):
             self.store.propose_action("review", " ")
+
+    def test_action_resolution_requires_non_empty_auditable_evidence(self):
+        self.store.init()
+        action = self.store.propose_action("review", "Review the evidence")
+        self.store.claim_action(action["id"], "itr_evidence")
+        for evidence in (None, {}, {"text": "  "}, {"items": []}, {"nested": {"verified": True}}):
+            with self.subTest(evidence=evidence):
+                with self.assertRaisesRegex(ValueError, "non-empty evidence"):
+                    self.store.complete_action(action["id"], evidence)
+        completed = self.store.complete_action(action["id"], {"verified": True})
+        self.assertEqual(completed["data"]["status"], "completed")
 
     def test_status_report_and_capabilities_surface_open_actions(self):
         self.store.init()

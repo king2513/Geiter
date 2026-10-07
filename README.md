@@ -199,6 +199,10 @@ highest-priority open action without pretending to execute external work.
 Agents can propose work with `action propose`, inspect it by priority with
 `action list`, then complete or skip it with evidence using `action complete` or
 `action skip`.
+Action completion and skip operations require at least one non-empty scalar
+evidence value; empty or nested-only evidence is rejected. If a failed gate has
+no open action left, `iterate` keeps that gate as its next decision signal
+instead of silently returning to general workspace advice.
 Reports distinguish open work from in-progress work so claimed actions remain
 visible across processes. Claims carry a one-hour lease by default. Interrupted
 claims appear under `action list --status stale` and can be requeued with

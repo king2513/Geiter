@@ -102,10 +102,10 @@ TOOLS = [
     },
     {
         "name": "geiter_complete_action",
-        "description": "Mark a persisted agent action complete with optional evidence.",
+        "description": "Mark a persisted agent action complete with required evidence.",
         "inputSchema": {
             "type": "object",
-            "required": ["action_id"],
+            "required": ["action_id", "evidence"],
             "properties": {
                 "action_id": {"type": "string"},
                 "evidence": {"type": "object"},
@@ -114,10 +114,10 @@ TOOLS = [
     },
     {
         "name": "geiter_skip_action",
-        "description": "Skip a persisted agent action with optional evidence.",
+        "description": "Skip a persisted agent action with required evidence.",
         "inputSchema": {
             "type": "object",
-            "required": ["action_id"],
+            "required": ["action_id", "evidence"],
             "properties": {
                 "action_id": {"type": "string"},
                 "evidence": {"type": "object"},

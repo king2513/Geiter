@@ -32,8 +32,8 @@ experiment result --id <experiment-id> --outcome <supported|rejected|inconclusiv
 iterate [--hypothesis <text>] --json
 action list [--status <open|in_progress|completed|skipped|stale|all>] --json
 action propose --type <type> --prompt <text> [--priority <normal|high|critical>] [--source <source>] [--dedupe-key <key>] --json
-action complete <action-id> [--evidence <text>] --json
-action skip <action-id> [--evidence <text>] --json
+action complete <action-id> --evidence <text> --json
+action skip <action-id> --evidence <text> --json
 action reclaim <action-id> [--evidence <text>] --json
 event list --json
 ```
@@ -74,8 +74,9 @@ claims the highest-priority open action and records it in the iteration trace;
 claiming does not imply that external work was completed.
 `geiter_actions` lists queued actions by priority; `geiter_propose_action`
 persists a new action without executing external effects; and
-`geiter_complete_action` or `geiter_skip_action` resolves one with optional
-evidence. Open actions with the same dedupe key are idempotent. Status and
+`geiter_complete_action` or `geiter_skip_action` resolves one with required
+evidence. Resolution requires at least one non-empty scalar evidence value;
+empty or nested-only evidence is rejected. Open actions with the same dedupe key are idempotent. Status and
 report payloads expose both
 `open_action_count` and `in_progress_action_count`, plus stale action counts.
 Claims carry a one-hour lease by default. `geiter_actions` accepts the virtual
@@ -150,8 +151,10 @@ and accepts only `improved` or `flat`. Experiments are proposals by default; app
 local record and refuses experiments marked with external side effects.
 An approved experiment can be completed with a structured result, which writes
 an `experiment.result` learning containing the selected comparison and evidence.
-`iterate` includes the latest comparison context, pending approved experiments,
-the claimed action (when present), and a next prompt chosen from those signals.
+`iterate` includes the latest comparison and regression-gate context, pending
+approved experiments, the claimed action (when present), and a next prompt
+chosen from those signals. If a failed gate's action was resolved or removed,
+the failed gate remains a first-class decision signal in the next iteration.
 `matrix` groups observations by provider and prompt intent, then returns the
 weakest cells an agent should improve first.
 
