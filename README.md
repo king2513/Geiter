@@ -34,6 +34,12 @@ Geiter is an agent-native runtime for Generative Engine Optimization (GEO). It g
 
 ## Quick start
 
+Install from the repository:
+
+```bash
+python -m pip install .
+```
+
 ```bash
 python -m geiter init
 python -m geiter goal add "Make Geiter easy for agents to discover and trust"
@@ -95,6 +101,12 @@ printf '%s\n' \
 ```
 
 Tools include `geiter_status`, `geiter_add_prompt`, `geiter_record_observation`, `geiter_analyze`, and `geiter_report`. Resources include `geiter://status` and `geiter://report`.
+
+To resume a provider run from an agent client:
+
+```json
+{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"geiter_resume","arguments":{"run_id":"run_...","provider":"jsonl","fixture":"examples/answers.jsonl"}}}
+```
 
 ## Provider plugins
 
