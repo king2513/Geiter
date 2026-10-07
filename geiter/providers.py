@@ -137,6 +137,35 @@ def run_provider(
     }
 
 
+def resume_provider(store, run_id: str, provider: Provider) -> dict:
+    """Resume a prior run, processing only prompts still eligible for retry."""
+    run = store.run(run_id)
+    if run["data"]["provider"] != provider.name:
+        raise ValueError(
+            f"provider mismatch for run {run_id}: expected {run['data']['provider']}, got {provider.name}"
+        )
+    if run["data"]["status"] == "completed":
+        raise ValueError(f"run {run_id} is already completed")
+    prompt_map = {prompt["id"]: prompt for prompt in store.prompts()}
+    missing = [prompt_id for prompt_id in run["data"]["prompt_ids"] if prompt_id not in prompt_map]
+    if missing:
+        raise ValueError(f"run {run_id} references missing prompts: {', '.join(missing)}")
+    attempted_prompt_ids = store.retryable_prompt_ids(run_id)
+    observations = []
+    for _ in range(run["data"]["max_attempts"]):
+        retry_ids = set(store.retryable_prompt_ids(run_id))
+        if not retry_ids:
+            break
+        batch = [prompt_map[prompt_id] for prompt_id in run["data"]["prompt_ids"] if prompt_id in retry_ids]
+        observations.extend(observe_prompts(store, batch, provider, run["data"].get("target"), run_id))
+    return {
+        "resumed_from": run_id,
+        "attempted_prompt_ids": attempted_prompt_ids,
+        "run": store.finish_run(run_id),
+        "observations": observations,
+    }
+
+
 def load_provider(name: str, **kwargs) -> Provider:
     """Load a built-in or installed provider plugin by name."""
     if name == "jsonl":

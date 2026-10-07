@@ -19,6 +19,7 @@ Geiter is an agent-native runtime for Generative Engine Optimization (GEO). It g
 - direction-safe reciprocal-rank citation signal and paired comparisons
 - observation/provider health checks that filter unusable evidence
 - provider run ledger with per-prompt success/failure attempts
+- resumable provider runs that continue from a durable run ID
 - structured attempt timing, error classes, and retryability decisions
 - stdio JSON-RPC gateway with tools and resources
 - `doctor` consistency checks and `report` snapshots
@@ -55,6 +56,8 @@ Replay a deterministic provider batch:
 
 ```bash
 python -m geiter run --provider jsonl --fixture examples/answers.jsonl --json
+# Continue a run after a process interruption.
+python -m geiter resume <run-id> --provider jsonl --fixture examples/answers.jsonl --json
 ```
 
 Use `--root` to point Geiter at another workspace:
@@ -114,7 +117,9 @@ Every batch run creates a durable run ledger. Provider exceptions are recorded
 per prompt, successful observations are preserved, and the batch finishes as
 `completed` or `partial` instead of silently losing the failure.
 Pass `--max-attempts N` to retry only failed prompts up to `N` total attempts;
-successful prompts are never replayed.
+successful prompts are never replayed. A run with remaining retryable prompts
+can be continued later with `resume <run-id>`; the provider and fixture are
+supplied again so the ledger remains portable and auditable.
 
 ## Design principles
 

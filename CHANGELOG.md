@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.6.0 - 2026-10-07
+
+- added durable run resumption by run ID
+- exposed resumable runs through the CLI and agent gateway
+- made run status distinguish active retry work from terminal partial runs
+
 ## 1.5.0 - 2026-10-07
 
 - added attempt numbers and duration metadata

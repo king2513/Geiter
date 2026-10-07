@@ -6,7 +6,7 @@ from typing import Any
 
 from .core import GeiterStore
 from .gateway import serve
-from .providers import load_provider, run_provider
+from .providers import load_provider, resume_provider, run_provider
 
 
 def parser() -> argparse.ArgumentParser:
@@ -42,6 +42,11 @@ def parser() -> argparse.ArgumentParser:
     run.add_argument("--target")
     run.add_argument("--max-attempts", type=int, default=1)
     run.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
+    resume = commands.add_parser("resume", help="Resume a provider run from its durable ledger")
+    resume.add_argument("run_id")
+    resume.add_argument("--provider", required=True)
+    resume.add_argument("--fixture", help="Path to JSONL provider fixture")
+    resume.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
 
     analyze = commands.add_parser("analyze", help="Analyze retrieval observations")
     analyze.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
@@ -150,6 +155,14 @@ def main(argv: list[str] | None = None) -> None:
         result = {
             "provider": provider.name,
             **run_provider(store, store.prompts(), provider, args.target, args.max_attempts),
+        }
+    elif args.command == "resume":
+        if args.provider == "jsonl" and not args.fixture:
+            raise SystemExit("resume --provider jsonl requires --fixture")
+        provider = load_provider(args.provider, path=args.fixture)
+        result = {
+            "provider": provider.name,
+            **resume_provider(store, args.run_id, provider),
         }
     elif args.command == "analyze":
         result = store.analyze()

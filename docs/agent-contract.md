@@ -17,6 +17,7 @@ matrix --json
 doctor --json
 report --json
 run --provider jsonl --fixture <path> --json
+resume <run-id> --provider jsonl --fixture <path> --json
 baseline save [--label <label>] --json
 baseline compare [--id <baseline-id>] --json
 experiment propose --hypothesis <text> --change <text> [--risk <level>] --json
@@ -30,7 +31,9 @@ event list --json
 For process-based integrations, run `python -m geiter gateway` and send one
 JSON-RPC request per line over stdin. Responses are one JSON object per line.
 The gateway currently exposes `geiter_status`, `geiter_add_prompt`,
-`geiter_record_observation`, `geiter_analyze`, and `geiter_report`.
+`geiter_record_observation`, `geiter_analyze`, `geiter_report`, and
+`geiter_resume`. The resume tool requires `run_id` and `provider`, plus
+`fixture` for the built-in JSONL provider.
 It also exposes `geiter://status` and `geiter://report` resources through
 `resources/list` and `resources/read`.
 
@@ -61,13 +64,18 @@ observations remain in the audit log but are excluded from GEO aggregates.
 
 `run` returns a `provider.run` record with one attempt per prompt. Attempts have
 `succeeded` or `failed` status and preserve the error text. A run is
-`completed` only when every prompt succeeds; otherwise it is `partial`.
+`completed` only when every prompt succeeds. A run is `running` when retryable
+prompts remain within the attempt budget, and `partial` when no more progress
+is available.
 `--max-attempts` bounds retries. `summary.exhausted` counts prompts that still
 failed after reaching that bound.
 Each attempt also exposes `attempt_number`, `duration_ms`, `error_type`, and
 `retryable`. Timeout, connection, and OS failures are retryable by default;
 configuration/value failures are recorded without blind retries.
 `geiter_runs` exposes recent ledgers to agent callers.
+`resume <run-id>` continues only retryable prompts from that ledger and never
+replays a prompt that already succeeded. Resuming an already completed run is
+an explicit error.
 
 Provider adapters implement one small contract:
 

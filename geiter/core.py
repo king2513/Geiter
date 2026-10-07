@@ -283,7 +283,12 @@ class GeiterStore:
             prompt_id for prompt_id in expected
             if sum(item["prompt_id"] == prompt_id for item in attempts) >= run["data"]["max_attempts"]
         }
-        run["data"]["status"] = "completed" if expected <= completed else "partial"
+        eligible = set(self.retryable_prompt_ids(run_id))
+        run["data"]["status"] = (
+            "completed" if expected <= completed
+            else "running" if eligible
+            else "partial"
+        )
         run["data"]["summary"] = {
             "expected": len(expected),
             "succeeded": len(completed),
@@ -312,6 +317,13 @@ class GeiterStore:
             if len(history) < run["data"]["max_attempts"]:
                 prompt_ids.append(prompt_id)
         return prompt_ids
+
+    def run(self, run_id: str) -> dict[str, Any]:
+        state = self.read()
+        run = next((item for item in state.get("runs", []) if item["id"] == run_id), None)
+        if run is None:
+            raise ValueError(f"unknown run id: {run_id}")
+        return run
 
     def add_prompt(self, text: str, intent: str | None = None) -> dict[str, Any]:
         normalized = " ".join(text.split())

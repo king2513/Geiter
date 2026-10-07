@@ -11,6 +11,7 @@ import sys
 from typing import Any
 
 from .core import GeiterStore
+from .providers import load_provider, resume_provider
 
 
 TOOLS = [
@@ -57,6 +58,19 @@ TOOLS = [
         "name": "geiter_runs",
         "description": "Read recent provider run ledgers and their success/failure summaries.",
         "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "geiter_resume",
+        "description": "Resume a provider run using only prompts still eligible for retry.",
+        "inputSchema": {
+            "type": "object",
+            "required": ["run_id", "provider"],
+            "properties": {
+                "run_id": {"type": "string"},
+                "provider": {"type": "string"},
+                "fixture": {"type": "string"},
+            },
+        },
     },
     {
         "name": "geiter_matrix",
@@ -146,7 +160,7 @@ def dispatch(store: GeiterStore, request: dict[str, Any]) -> dict[str, Any] | No
     if method == "initialize":
         return _result(request_id, {
             "protocolVersion": "2025-06-18",
-            "serverInfo": {"name": "geiter", "version": "1.5.0"},
+            "serverInfo": {"name": "geiter", "version": "1.6.0"},
             "capabilities": {"tools": {}},
         })
     if method == "notifications/initialized":
@@ -204,6 +218,18 @@ def dispatch(store: GeiterStore, request: dict[str, Any]) -> dict[str, Any] | No
             value = store.health()
         elif name == "geiter_runs":
             value = store.list_records("runs")[-20:]
+        elif name == "geiter_resume":
+            provider_name = args["provider"]
+            if provider_name == "jsonl" and not args.get("fixture"):
+                raise ValueError("geiter_resume with jsonl requires fixture")
+            value = {
+                "provider": provider_name,
+                **resume_provider(
+                    store,
+                    args["run_id"],
+                    load_provider(provider_name, path=args.get("fixture")),
+                ),
+            }
         elif name == "geiter_matrix":
             value = store.analyze_matrix()
         elif name == "geiter_report":

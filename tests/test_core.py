@@ -5,7 +5,7 @@ from pathlib import Path
 
 from geiter.core import GeiterStore
 from geiter.gateway import dispatch
-from geiter.providers import JsonlProvider, ProviderAnswer, load_provider, observe_prompts, run_provider
+from geiter.providers import JsonlProvider, ProviderAnswer, load_provider, observe_prompts, resume_provider, run_provider
 
 
 class GeiterStoreTests(unittest.TestCase):
@@ -244,6 +244,53 @@ class GeiterStoreTests(unittest.TestCase):
         self.assertEqual(len(result["run"]["data"]["attempts"]), 1)
         self.assertEqual(result["run"]["data"]["attempts"][0]["retryable"], False)
         self.assertEqual(result["run"]["data"]["summary"]["exhausted"], 0)
+
+    def test_resume_continues_a_partial_run_without_replaying_success(self):
+        self.store.init()
+        prompt_a = self.store.add_prompt("What is Geiter?")
+        prompt_b = self.store.add_prompt("Why use Geiter?")
+        calls = []
+
+        class RecoveringProvider:
+            name = "recovering"
+
+            def answer(self, prompt):
+                calls.append(prompt)
+                if prompt == "Why use Geiter?" and calls.count(prompt) == 1:
+                    raise TimeoutError("temporary")
+                return ProviderAnswer(self.name, "Geiter is useful.", ["https://geiter.dev/docs"])
+
+        run = self.store.start_run("recovering", [prompt_a["id"], prompt_b["id"]], max_attempts=2)
+        from geiter.providers import observe_prompts
+
+        observe_prompts(self.store, [prompt_a, prompt_b], RecoveringProvider(), run_id=run["id"])
+        first = {"run": self.store.finish_run(run["id"])}
+        self.assertEqual(first["run"]["data"]["status"], "running")
+        resumed = resume_provider(self.store, first["run"]["id"], RecoveringProvider())
+        self.assertEqual(resumed["attempted_prompt_ids"], [prompt_b["id"]])
+        self.assertEqual(resumed["run"]["data"]["status"], "completed")
+        self.assertEqual(calls, ["What is Geiter?", "Why use Geiter?", "Why use Geiter?"])
+        self.assertEqual(len(self.store.read()["observations"]), 2)
+
+    def test_gateway_can_resume_a_run(self):
+        self.store.init()
+        prompt = self.store.add_prompt("What is Geiter?")
+        run = self.store.start_run("fixture", [prompt["id"]], max_attempts=2)
+        listed = dispatch(self.store, {"jsonrpc": "2.0", "id": 11, "method": "tools/list"})
+        names = {tool["name"] for tool in listed["result"]["content"][0]["json"]["tools"]}
+        self.assertIn("geiter_resume", names)
+        response = dispatch(self.store, {
+            "jsonrpc": "2.0",
+            "id": 12,
+            "method": "tools/call",
+            "params": {
+                "name": "geiter_resume",
+                "arguments": {"run_id": run["id"], "provider": "fixture"},
+            },
+        })
+        value = response["result"]["content"][0]["json"]
+        self.assertEqual(value["resumed_from"], run["id"])
+        self.assertEqual(value["run"]["data"]["status"], "completed")
 
     def test_gateway_exposes_resources(self):
         self.store.init()
