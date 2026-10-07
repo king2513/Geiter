@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.7.0 - 2026-10-07
+
+- added client-ready agent connection configuration output
+- added `connect` CLI formats for generic, Claude, Cursor, and VS Code clients
+- exposed `geiter_connect` through the JSON-RPC gateway
+
 ## 1.6.0 - 2026-10-07
 
 - added durable run resumption by run ID

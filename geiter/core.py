@@ -325,6 +325,17 @@ class GeiterStore:
             raise ValueError(f"unknown run id: {run_id}")
         return run
 
+    def connection_config(self) -> dict[str, Any]:
+        """Return a portable stdio configuration for agent clients."""
+        return {
+            "name": "geiter",
+            "command": "python",
+            "args": ["-m", "geiter", "--root", str(self.root), "gateway"],
+            "transport": "stdio",
+            "cwd": str(self.root),
+            "protocol": "json-rpc",
+        }
+
     def add_prompt(self, text: str, intent: str | None = None) -> dict[str, Any]:
         normalized = " ".join(text.split())
         if not normalized:

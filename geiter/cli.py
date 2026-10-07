@@ -77,6 +77,9 @@ def parser() -> argparse.ArgumentParser:
     )
     gateway = commands.add_parser("gateway", help="Serve the stdio agent gateway")
     gateway.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
+    connect = commands.add_parser("connect", help="Print agent client connection configuration")
+    connect.add_argument("--format", choices=("generic", "claude", "cursor", "vscode"), default="generic")
+    connect.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
 
     iterate = commands.add_parser("iterate", help="Run one self-iteration cycle")
     iterate.add_argument("--hypothesis")
@@ -193,6 +196,16 @@ def main(argv: list[str] | None = None) -> None:
     elif args.command == "gateway":
         serve(args.root)
         return
+    elif args.command == "connect":
+        base = store.connection_config()
+        if args.format == "generic":
+            result = base
+        elif args.format == "claude":
+            result = {"mcpServers": {"geiter": {"command": base["command"], "args": base["args"]}}}
+        elif args.format == "cursor":
+            result = {"mcpServers": {"geiter": {"command": base["command"], "args": base["args"]}}}
+        else:
+            result = {"servers": {"geiter": {"type": "stdio", "command": base["command"], "args": base["args"]}}}
     elif args.command == "iterate":
         result = store.iterate(args.hypothesis)
     elif args.command == "goal":

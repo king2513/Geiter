@@ -72,6 +72,15 @@ Use `--root` to point Geiter at another workspace:
 python -m geiter --root ./demo status --json
 ```
 
+Print a client-ready MCP configuration:
+
+```bash
+python -m geiter connect --format generic --json
+python -m geiter connect --format claude --json
+python -m geiter connect --format cursor --json
+python -m geiter connect --format vscode --json
+```
+
 ## Core model
 
 ```text

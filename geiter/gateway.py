@@ -60,6 +60,16 @@ TOOLS = [
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
+        "name": "geiter_connect",
+        "description": "Return a portable stdio configuration for an agent client.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "format": {"type": "string", "enum": ["generic", "claude", "cursor", "vscode"]},
+            },
+        },
+    },
+    {
         "name": "geiter_resume",
         "description": "Resume a provider run using only prompts still eligible for retry.",
         "inputSchema": {
@@ -160,7 +170,7 @@ def dispatch(store: GeiterStore, request: dict[str, Any]) -> dict[str, Any] | No
     if method == "initialize":
         return _result(request_id, {
             "protocolVersion": "2025-06-18",
-            "serverInfo": {"name": "geiter", "version": "1.6.0"},
+            "serverInfo": {"name": "geiter", "version": "1.7.0"},
             "capabilities": {"tools": {}},
         })
     if method == "notifications/initialized":
@@ -218,6 +228,17 @@ def dispatch(store: GeiterStore, request: dict[str, Any]) -> dict[str, Any] | No
             value = store.health()
         elif name == "geiter_runs":
             value = store.list_records("runs")[-20:]
+        elif name == "geiter_connect":
+            connection = store.connection_config()
+            output_format = args.get("format", "generic")
+            if output_format == "generic":
+                value = connection
+            elif output_format in {"claude", "cursor"}:
+                value = {"mcpServers": {"geiter": {"command": connection["command"], "args": connection["args"]}}}
+            elif output_format == "vscode":
+                value = {"servers": {"geiter": {"type": "stdio", "command": connection["command"], "args": connection["args"]}}}
+            else:
+                raise ValueError(f"unsupported connection format: {output_format}")
         elif name == "geiter_resume":
             provider_name = args["provider"]
             if provider_name == "jsonl" and not args.get("fixture"):

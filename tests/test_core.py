@@ -292,6 +292,22 @@ class GeiterStoreTests(unittest.TestCase):
         self.assertEqual(value["resumed_from"], run["id"])
         self.assertEqual(value["run"]["data"]["status"], "completed")
 
+    def test_connection_config_is_portable_and_exposed_to_agents(self):
+        self.store.init()
+        config = self.store.connection_config()
+        self.assertEqual(config["transport"], "stdio")
+        self.assertEqual(config["protocol"], "json-rpc")
+        self.assertEqual(config["args"][-1], "gateway")
+        listed = dispatch(self.store, {"jsonrpc": "2.0", "id": 13, "method": "tools/list"})
+        names = {tool["name"] for tool in listed["result"]["content"][0]["json"]["tools"]}
+        self.assertIn("geiter_connect", names)
+        response = dispatch(self.store, {
+            "jsonrpc": "2.0", "id": 14, "method": "tools/call",
+            "params": {"name": "geiter_connect", "arguments": {"format": "vscode"}},
+        })
+        value = response["result"]["content"][0]["json"]
+        self.assertEqual(value["servers"]["geiter"]["type"], "stdio")
+
     def test_gateway_exposes_resources(self):
         self.store.init()
         listed = dispatch(self.store, {"jsonrpc": "2.0", "id": 4, "method": "resources/list"})

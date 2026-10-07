@@ -21,6 +21,7 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn("actions/workflows/ci.yml", readme)
         self.assertIn("python -m pip install .", readme)
         self.assertIn('"name":"geiter_resume"', readme)
+        self.assertIn("python -m geiter connect", readme)
 
     def test_release_workflow_is_tagged(self):
         workflow = (self.root / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")

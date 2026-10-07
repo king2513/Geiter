@@ -18,6 +18,7 @@ doctor --json
 report --json
 run --provider jsonl --fixture <path> --json
 resume <run-id> --provider jsonl --fixture <path> --json
+connect [--format <generic|claude|cursor|vscode>] --json
 baseline save [--label <label>] --json
 baseline compare [--id <baseline-id>] --json
 experiment propose --hypothesis <text> --change <text> [--risk <level>] --json
@@ -34,6 +35,8 @@ The gateway currently exposes `geiter_status`, `geiter_add_prompt`,
 `geiter_record_observation`, `geiter_analyze`, `geiter_report`, and
 `geiter_resume`. The resume tool requires `run_id` and `provider`, plus
 `fixture` for the built-in JSONL provider.
+`geiter_connect` returns the same configuration shape as the CLI and never
+writes client configuration files.
 It also exposes `geiter://status` and `geiter://report` resources through
 `resources/list` and `resources/read`.
 
