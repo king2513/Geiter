@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.0 - 2026-10-07
+
+- rebuilt README as an ASCII, agent-first project entry point
+- added project contract tests for encoding, version drift, and release triggers
+- clarified current capabilities and the next engineering frontier
+
 ## 0.5.0 - 2026-10-07
 
 - added provider entry-point discovery for third-party adapters

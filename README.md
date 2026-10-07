@@ -1,42 +1,44 @@
-# Geiter
+﻿# Geiter
+
+[![CI](https://github.com/king2513/Geiter/actions/workflows/ci.yml/badge.svg)](https://github.com/king2513/Geiter/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/king2513/Geiter?display_name=tag)](https://github.com/king2513/Geiter/releases)
+[![Python](https://img.shields.io/badge/python-3.10%2B-3776AB)](https://www.python.org/)
 
 > The self-improving GEO runtime for agents.
 
-Geiter is an agent-native workspace for Generative Engine Optimization. It helps an agent inspect a knowledge surface, form a hypothesis, leave an auditable action trail, measure what happened, and carry the learning into the next loop.
+Geiter is an agent-native runtime for Generative Engine Optimization (GEO). It gives agents a durable loop to inspect a knowledge surface, probe retrieval, measure mention and citation signals, and choose the next experiment.
 
-The first release is dependency-free:
+**Geiter is built for agents first.** Humans can read the files, but the primary interface is typed state, stable JSON, JSON-RPC tools, and replayable evidence.
+
+## What ships today
 
 - durable local state in `.geiter/state.json`
 - append-only event log in `.geiter/events.jsonl`
-- stable JSON output for agent callers
 - deterministic retrieval prompts and provider observations
-- first GEO signals: mention rate, citation rate, citation position
-- stdio JSON-RPC gateway for agent and MCP-style callers
+- mention, citation, target-citation, and citation-position signals
+- stdio JSON-RPC gateway with tools and resources
 - `doctor` consistency checks and `report` snapshots
-- replayable provider adapters and batch observation runs
+- replayable JSONL provider runs
 - installable provider plugins through `geiter.providers` entry points
-- MCP-style resources for status and reports
-- a deterministic loop: `inspect -> hypothesize -> act -> measure -> learn`
+- zero runtime dependencies; Python 3.10+
 
 ## Quick start
 
-Requires Python 3.10+.
-
 ```bash
 python -m geiter init
-python -m geiter goal add "Make Geiter the clearest agent-native GEO runtime"
-python -m geiter memory add principle "Agents should inspect Geiter without reading prose."
+python -m geiter goal add "Make Geiter easy for agents to discover and trust"
 python -m geiter prompt add "What is Geiter?" --intent discovery
 python -m geiter prompt list --json
-# Use the returned prompt id:
 python -m geiter observe <prompt-id> --provider fixture --answer "Geiter is an agent-native GEO runtime." --citation https://example.com/geiter
 python -m geiter analyze --json
 python -m geiter doctor --json
 python -m geiter report --json
-python -m geiter run --provider jsonl --fixture ./answers.jsonl --json
-python -m geiter inspect
-python -m geiter iterate --hypothesis "Expose one canonical JSON contract"
-python -m geiter status --json
+```
+
+Replay a deterministic provider batch:
+
+```bash
+python -m geiter run --provider jsonl --fixture examples/answers.jsonl --json
 ```
 
 Use `--root` to point Geiter at another workspace:
@@ -49,56 +51,22 @@ python -m geiter --root ./demo status --json
 
 ```text
 Workspace
-  ├── identity       what Geiter is trying to become
-  ├── goals          desired outcomes
-  ├── memories       durable principles and facts
-  ├── prompts        retrieval questions to probe
-  ├── observations   what the agent currently sees
-  ├── hypotheses     explanations worth testing
-  ├── actions        changes or experiments
-  ├── measurements   evidence of effect
-  └── learnings      what should change in the next loop
+  |- identity       what Geiter is trying to become
+  |- goals          desired outcomes
+  |- memories       durable principles and facts
+  |- prompts        retrieval questions to probe
+  |- observations   what the agent currently sees
+  |- hypotheses     explanations worth testing
+  |- actions        changes or experiments
+  |- measurements   evidence of effect
+  `- learnings      what should change in the next loop
 ```
 
-The runtime does not pretend to be a full crawler, search engine, or LLM. Those capabilities can attach through adapters without changing the core contract.
+The runtime does not pretend to be a full crawler, search engine, or LLM. Those capabilities attach through adapters without changing the core contract.
 
-## Why Geiter exists
+## Agent gateway
 
-Most GEO tooling optimizes pages for human readers and treats agents as an analytics channel. Geiter reverses that relationship:
-
-1. Agent-readable first: important operations have stable JSON output.
-2. Evidence over vibes: observations, hypotheses, actions, and measurements are typed records.
-3. Self-iteration: every cycle ends by writing a learning.
-4. Portable by default: the kernel uses only the Python standard library.
-5. Composable: the CLI can later be wrapped by MCP, HTTP, or another orchestrator.
-
-## Commands
-
-| Command | Purpose |
-| --- | --- |
-| `init` | Create a Geiter workspace |
-| `status` | Read the current state summary |
-| `inspect` | Record a fresh workspace observation |
-| `goal add/list` | Manage desired outcomes |
-| `memory add/list` | Manage durable agent memory |
-| `prompt add/list` | Manage deterministic retrieval prompts |
-| `observe` | Record a provider answer and citations |
-| `analyze` | Compute GEO signals and next action |
-| `doctor` | Validate state and event consistency |
-| `report` | Emit a complete machine-readable report |
-| `gateway` | Serve the stdio agent gateway |
-| `run` | Replay a provider fixture across all prompts |
-| `iterate` | Run one self-iteration cycle |
-| `event list` | Inspect the event stream |
-
-## Development
-
-```bash
-python -m unittest discover -s tests -v
-python -m geiter --help
-```
-
-Agent gateway smoke test:
+Run the stdio JSON-RPC gateway:
 
 ```bash
 printf '%s\n' \
@@ -107,13 +75,9 @@ printf '%s\n' \
   | python -m geiter gateway
 ```
 
-Provider fixtures are JSONL so runs are deterministic and reviewable:
+Tools include `geiter_status`, `geiter_add_prompt`, `geiter_record_observation`, `geiter_analyze`, and `geiter_report`. Resources include `geiter://status` and `geiter://report`.
 
-```json
-{"prompt":"What is Geiter?","provider":"replay","answer":"Geiter is an agent-native GEO runtime.","citations":["https://geiter.dev/docs"]}
-```
-
-### Provider plugins
+## Provider plugins
 
 Third-party packages can register a provider without changing Geiter:
 
@@ -122,13 +86,31 @@ Third-party packages can register a provider without changing Geiter:
 my-provider = "my_package.provider:factory"
 ```
 
-The factory receives provider-specific keyword arguments and returns an object
-implementing `answer(prompt) -> {provider, answer, citations}`.
+The factory returns an object implementing:
 
-## Roadmap
+```python
+answer(prompt: str) -> ProviderAnswer
+```
 
-- MCP tools and resources over the same domain contract
-- repository and content adapters for real GEO observations
-- retrieval probes and evaluator adapters
-- policy gates for safe autonomous actions
-- SQLite persistence when multi-run querying becomes necessary
+The built-in JSONL adapter is replay-only and has no network access, which keeps regression runs deterministic and reviewable.
+
+## Design principles
+
+- **Evidence is first-class.** Every observation keeps provider, answer hash, citations, metrics, and event history.
+- **Replay before reach.** Fixtures make experiments deterministic before connecting a live provider.
+- **Adapters stay outside the kernel.** Provider plugins extend Geiter without forcing dependencies into every installation.
+- **Autonomy has a boundary.** Geiter measures and proposes; external publishing needs an explicit adapter and policy.
+
+## Development
+
+```bash
+python -m unittest discover -s tests -v
+python tests/syntax_check.py
+python -m geiter --help
+```
+
+See [docs/agent-contract.md](docs/agent-contract.md), [CONTRIBUTING.md](CONTRIBUTING.md), and [CHANGELOG.md](CHANGELOG.md) for the machine contract and release history.
+
+## Next frontier
+
+The active project frontier is live provider adapters, richer retrieval evaluators, policy-gated experiments, and a SQLite backend when query volume outgrows the local JSON contract.
