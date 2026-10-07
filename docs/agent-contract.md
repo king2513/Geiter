@@ -32,6 +32,8 @@ event list --json
 
 For process-based integrations, run `python -m geiter gateway` and send one
 JSON-RPC request per line over stdin. Responses are one JSON object per line.
+`initialize` advertises both `tools` and `resources` capabilities. Invalid
+JSON-RPC envelopes return `-32600`; unexpected server failures return `-32603`.
 The gateway currently exposes `geiter_status`, `geiter_add_prompt`,
 `geiter_record_observation`, `geiter_analyze`, `geiter_report`, and
 `geiter_resume`. The resume tool requires `run_id` and `provider`, plus

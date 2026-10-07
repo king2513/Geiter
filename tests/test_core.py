@@ -172,6 +172,17 @@ class GeiterStoreTests(unittest.TestCase):
         )
         self.assertEqual(response["result"]["content"][0]["json"]["kind"], "prompt")
 
+    def test_gateway_advertises_capabilities_and_rejects_invalid_requests(self):
+        self.store.init()
+        initialized = dispatch(self.store, {
+            "jsonrpc": "2.0", "id": 15, "method": "initialize", "params": {},
+        })
+        capabilities = initialized["result"]["content"][0]["json"]["capabilities"]
+        self.assertIn("tools", capabilities)
+        self.assertIn("resources", capabilities)
+        invalid = dispatch(self.store, {"jsonrpc": "1.0", "id": 16, "method": "tools/list"})
+        self.assertEqual(invalid["error"]["code"], -32600)
+
     def test_jsonl_provider_replays_a_batch(self):
         self.store.init()
         prompt = self.store.add_prompt("What is Geiter?")

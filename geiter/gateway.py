@@ -177,14 +177,16 @@ def _error(request_id: Any, code: int, message: str) -> dict[str, Any]:
 
 
 def dispatch(store: GeiterStore, request: dict[str, Any]) -> dict[str, Any] | None:
+    if request.get("jsonrpc") != "2.0" or "method" not in request:
+        return _error(request.get("id"), -32600, "invalid JSON-RPC request")
     request_id = request.get("id")
     method = request.get("method")
     params = request.get("params") or {}
     if method == "initialize":
         return _result(request_id, {
             "protocolVersion": "2025-06-18",
-            "serverInfo": {"name": "geiter", "version": "1.9.0"},
-            "capabilities": {"tools": {}},
+            "serverInfo": {"name": "geiter", "version": "1.10.0"},
+            "capabilities": {"tools": {}, "resources": {}},
         })
     if method == "notifications/initialized":
         return None
@@ -312,3 +314,5 @@ def serve(root: str = ".") -> None:
                 print(json.dumps(response, ensure_ascii=False), flush=True)
         except json.JSONDecodeError as exc:
             print(json.dumps(_error(None, -32700, str(exc))), flush=True)
+        except Exception as exc:
+            print(json.dumps(_error(None, -32603, str(exc))), flush=True)

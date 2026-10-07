@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.10.0 - 2026-10-08
+
+- advertised tools and resources capabilities during gateway initialization
+- added standard JSON-RPC invalid-request and internal-error responses
+
 ## 1.9.0 - 2026-10-08
 
 - added typed next-step actions to regression gate results
