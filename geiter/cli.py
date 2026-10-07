@@ -85,6 +85,12 @@ def parser() -> argparse.ArgumentParser:
     connect = commands.add_parser("connect", help="Print agent client connection configuration")
     connect.add_argument("--format", choices=("generic", "claude", "cursor", "vscode"), default="generic")
     connect.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
+    action = commands.add_parser("action", help="Manage persisted agent actions")
+    action.add_argument("operation", choices=("list", "complete"))
+    action.add_argument("action_id", nargs="?")
+    action.add_argument("--status", default="open")
+    action.add_argument("--evidence")
+    action.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
 
     iterate = commands.add_parser("iterate", help="Run one self-iteration cycle")
     iterate.add_argument("--hypothesis")
@@ -219,6 +225,14 @@ def main(argv: list[str] | None = None) -> None:
             result = {"mcpServers": {"geiter": {"command": base["command"], "args": base["args"]}}}
         else:
             result = {"servers": {"geiter": {"type": "stdio", "command": base["command"], "args": base["args"]}}}
+    elif args.command == "action":
+        if args.operation == "list":
+            result = store.list_actions(args.status)
+        else:
+            if not args.action_id:
+                raise SystemExit("action complete requires action_id")
+            evidence = {"text": args.evidence} if args.evidence else None
+            result = store.complete_action(args.action_id, evidence)
     elif args.command == "iterate":
         result = store.iterate(args.hypothesis)
     elif args.command == "goal":

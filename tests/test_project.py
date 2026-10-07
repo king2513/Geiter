@@ -24,6 +24,7 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn("python -m geiter connect", readme)
         self.assertIn("python -m geiter regression", readme)
         self.assertIn("geiter://capabilities", readme)
+        self.assertIn("action list", readme)
 
     def test_release_workflow_is_tagged(self):
         workflow = (self.root / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")

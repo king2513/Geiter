@@ -29,6 +29,7 @@ Geiter is an agent-native runtime for Generative Engine Optimization (GEO). It g
 - policy-gated experiment proposals with explicit approval
 - experiment result ledger linking evidence, comparisons, and learnings
 - evidence-aware `iterate` cycles that consume comparisons and pending experiments
+- persistent prioritized agent action queue with evidence-backed completion
 - provider/intent coverage matrix with weakest-cell recommendations
 - zero runtime dependencies; Python 3.10+
 
@@ -56,6 +57,7 @@ python -m geiter baseline compare --json
 python -m geiter experiment propose --hypothesis "Improve citation rate" --change "Add authoritative docs" --json
 python -m geiter experiment result --id <experiment-id> --outcome supported --evidence "Citation rate improved" --json
 python -m geiter iterate --json
+python -m geiter action list --json
 ```
 
 Replay a deterministic provider batch:
@@ -111,7 +113,7 @@ printf '%s\n' \
   | python -m geiter gateway
 ```
 
-Tools include `geiter_status`, `geiter_add_prompt`, `geiter_record_observation`, `geiter_analyze`, `geiter_report`, `geiter_resume`, `geiter_regression`, and `geiter_capabilities`. Resources include `geiter://status`, `geiter://report`, and `geiter://capabilities`.
+Tools include `geiter_status`, `geiter_add_prompt`, `geiter_record_observation`, `geiter_analyze`, `geiter_report`, `geiter_resume`, `geiter_regression`, `geiter_actions`, `geiter_complete_action`, and `geiter_capabilities`. Resources include `geiter://status`, `geiter://report`, and `geiter://capabilities`.
 
 To resume a provider run from an agent client:
 
@@ -144,6 +146,10 @@ as a single pass/fail contract without interpreting prose.
 `geiter://capabilities` is the stable discovery surface for agents: it reports
 the version, state and report schemas, transport, entrypoints, and operating
 principles without changing workspace state.
+
+Regression gate actions are persisted in the workspace. Agents can inspect
+them by priority with `action list`, then complete them with evidence using
+`action complete <action-id> --evidence <text>`.
 
 Every batch run creates a durable run ledger. Provider exceptions are recorded
 per prompt, successful observations are preserved, and the batch finishes as

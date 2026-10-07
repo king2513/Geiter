@@ -60,6 +60,26 @@ TOOLS = [
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
+        "name": "geiter_actions",
+        "description": "List persisted agent actions ordered by priority.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"status": {"type": "string"}},
+        },
+    },
+    {
+        "name": "geiter_complete_action",
+        "description": "Mark a persisted agent action complete with optional evidence.",
+        "inputSchema": {
+            "type": "object",
+            "required": ["action_id"],
+            "properties": {
+                "action_id": {"type": "string"},
+                "evidence": {"type": "object"},
+            },
+        },
+    },
+    {
         "name": "geiter_connect",
         "description": "Return a portable stdio configuration for an agent client.",
         "inputSchema": {
@@ -191,7 +211,7 @@ def dispatch(store: GeiterStore, request: dict[str, Any]) -> dict[str, Any] | No
     if method == "initialize":
         return _result(request_id, {
             "protocolVersion": "2025-06-18",
-            "serverInfo": {"name": "geiter", "version": "1.11.1"},
+            "serverInfo": {"name": "geiter", "version": "1.12.0"},
             "capabilities": {"tools": {}, "resources": {}},
         })
     if method == "notifications/initialized":
@@ -253,6 +273,10 @@ def dispatch(store: GeiterStore, request: dict[str, Any]) -> dict[str, Any] | No
             value = store.health()
         elif name == "geiter_runs":
             value = store.list_records("runs")[-20:]
+        elif name == "geiter_actions":
+            value = store.list_actions(args.get("status", "open"))
+        elif name == "geiter_complete_action":
+            value = store.complete_action(args["action_id"], args.get("evidence"))
         elif name == "geiter_connect":
             connection = store.connection_config()
             output_format = args.get("format", "generic")

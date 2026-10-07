@@ -362,6 +362,39 @@ class GeiterStoreTests(unittest.TestCase):
         checks = {check["name"]: check["ok"] for check in result["gate"]["checks"]}
         self.assertFalse(checks["prompts_present"])
         self.assertEqual(result["gate"]["action"]["type"], "add_prompts")
+        self.assertEqual(result["gate"]["action_record"]["data"]["status"], "open")
+
+    def test_persisted_actions_dedupe_sort_and_complete_idempotently(self):
+        self.store.init()
+        normal = self.store.propose_action("review", "Review evidence")
+        high = self.store.propose_action("repair", "Repair provider", priority="high")
+        duplicate = self.store.propose_action("repair", "Repair provider", priority="high")
+        self.assertEqual(duplicate["id"], high["id"])
+        self.assertEqual([item["id"] for item in self.store.list_actions()], [high["id"], normal["id"]])
+        completed = self.store.complete_action(high["id"], {"ticket": "evidence-1"})
+        repeated = self.store.complete_action(high["id"])
+        self.assertEqual(completed["data"]["status"], "completed")
+        self.assertEqual(repeated["data"]["completion_evidence"], {"ticket": "evidence-1"})
+        self.assertEqual([item["id"] for item in self.store.list_actions()], [normal["id"]])
+
+    def test_gateway_manages_persisted_actions(self):
+        self.store.init()
+        action = self.store.propose_action("repair", "Fix fixture", priority="high")
+        listed = dispatch(self.store, {
+            "jsonrpc": "2.0", "id": 20, "method": "tools/call",
+            "params": {"name": "geiter_actions", "arguments": {}},
+        })
+        self.assertEqual(listed["result"]["content"][0]["json"][0]["id"], action["id"])
+        completed = dispatch(self.store, {
+            "jsonrpc": "2.0", "id": 21, "method": "tools/call",
+            "params": {
+                "name": "geiter_complete_action",
+                "arguments": {"action_id": action["id"], "evidence": {"fixed": True}},
+            },
+        })
+        self.assertEqual(
+            completed["result"]["content"][0]["json"]["data"]["status"], "completed"
+        )
 
     def test_gateway_exposes_resources(self):
         self.store.init()

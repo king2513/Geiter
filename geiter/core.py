@@ -340,7 +340,7 @@ class GeiterStore:
         """Return a stable machine-readable description of Geiter's contract."""
         return {
             "schema": "geiter/capabilities-v1",
-            "version": "1.11.1",
+            "version": "1.12.0",
             "identity": self.read()["identity"],
             "state_schema": "geiter/v1",
             "report_schemas": [
@@ -370,6 +370,70 @@ class GeiterStore:
                 "external-effects-require-policy",
             ],
         }
+
+    def propose_action(
+        self,
+        action_type: str,
+        prompt: str,
+        priority: str = "normal",
+        source: str = "agent",
+        dedupe_key: str | None = None,
+        evidence: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Persist an actionable next step without executing external effects."""
+        if priority not in {"normal", "high", "critical"}:
+            raise ValueError(f"unsupported action priority: {priority}")
+        state = self.read()
+        key = dedupe_key or f"{source}:{action_type}:{prompt}"
+        existing = next(
+            (
+                item for item in state.get("actions", [])
+                if item.get("kind") == "agent.action"
+                and item["data"].get("dedupe_key") == key
+                and item["data"].get("status") == "open"
+            ),
+            None,
+        )
+        if existing:
+            return existing
+        return self.add(
+            "actions",
+            "agent.action",
+            {
+                "type": action_type,
+                "prompt": prompt,
+                "priority": priority,
+                "source": source,
+                "dedupe_key": key,
+                "status": "open",
+                "evidence": evidence or {},
+            },
+        )
+
+    def list_actions(self, status: str | None = "open") -> list[dict[str, Any]]:
+        actions = [
+            item for item in self.list_records("actions")
+            if item.get("kind") == "agent.action"
+        ]
+        if status is not None:
+            actions = [item for item in actions if item["data"].get("status") == status]
+        rank = {"critical": 0, "high": 1, "normal": 2}
+        return sorted(actions, key=lambda item: (rank.get(item["data"].get("priority"), 9), item["created_at"]))
+
+    def complete_action(self, action_id: str, evidence: dict[str, Any] | None = None) -> dict[str, Any]:
+        state = self.read()
+        action = next((item for item in state.get("actions", []) if item["id"] == action_id), None)
+        if action is None or action.get("kind") != "agent.action":
+            raise ValueError(f"unknown action id: {action_id}")
+        if action["data"].get("status") == "completed":
+            return action
+        action["data"]["status"] = "completed"
+        action["data"]["completed_at"] = now()
+        if evidence:
+            action["data"]["completion_evidence"] = evidence
+        self._write(state)
+        self.event("actions.completed", action)
+        return action
 
     def regression_gate(self, run: dict[str, Any]) -> dict[str, Any]:
         """Evaluate a provider run and workspace health as one machine gate."""
@@ -438,6 +502,14 @@ class GeiterStore:
             "checks": checks,
             "failed_checks": [check["name"] for check in failed],
             "action": action,
+            "action_record": self.propose_action(
+                action["type"],
+                action["prompt"],
+                action["priority"],
+                source="regression_gate",
+                dedupe_key=f"regression:{run['id']}:{action['type']}",
+                evidence={"run_id": run["id"], "failed_checks": [check["name"] for check in failed]},
+            ),
             "health": health,
             "doctor": doctor,
             "next_action": "Regression gate passed." if not failed

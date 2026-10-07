@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.12.0 - 2026-10-08
+
+- added a persistent, priority-ordered agent action queue
+- persisted regression gate actions with run evidence and deduplication
+- exposed action listing and evidence-backed completion through CLI and gateway
+
 ## 1.11.1 - 2026-10-08
 
 - added CI smoke verification for the built wheel and installed CLI

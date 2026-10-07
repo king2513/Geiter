@@ -26,6 +26,8 @@ experiment propose --hypothesis <text> --change <text> [--risk <level>] --json
 experiment approve --id <experiment-id> --json
 experiment result --id <experiment-id> --outcome <supported|rejected|inconclusive> --evidence <text> --json
 iterate [--hypothesis <text>] --json
+action list [--status <open|completed>] --json
+action complete <action-id> [--evidence <text>] --json
 iterate [--hypothesis <text>] --json
 event list --json
 ```
@@ -45,6 +47,9 @@ capability document, including version, schemas, transport, and entrypoints.
 `geiter_regression` runs the configured prompts against a provider and returns
 a `geiter/gate-v1` payload containing an `ok` boolean, named checks, failed
 check names, and a typed next-step `action`.
+The gate action is also persisted as an `agent.action` record. `geiter_actions`
+lists queued actions by priority; `geiter_complete_action` completes one with
+optional evidence. Open actions with the same dedupe key are idempotent.
 It also exposes `geiter://status` and `geiter://report` resources through
 `resources/list` and `resources/read`.
 
