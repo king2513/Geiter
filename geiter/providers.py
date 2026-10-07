@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
+from importlib.metadata import entry_points
 from typing import Iterable, Protocol
 
 
@@ -91,3 +92,17 @@ def observe_prompts(store, prompts: Iterable[dict], provider: Provider, target: 
             target,
         ))
     return results
+
+
+def load_provider(name: str, **kwargs) -> Provider:
+    """Load a built-in or installed provider plugin by name."""
+    if name == "jsonl":
+        return JsonlProvider(kwargs["path"])
+    if name == "fixture":
+        return FixtureProvider(kwargs.get("answers"))
+    discovered = entry_points()
+    matches = discovered.select(group="geiter.providers", name=name)
+    if not matches:
+        raise ValueError(f"unknown provider: {name}")
+    factory = next(iter(matches)).load()
+    return factory(**kwargs)

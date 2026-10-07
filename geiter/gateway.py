@@ -55,6 +55,21 @@ TOOLS = [
     },
 ]
 
+RESOURCES = [
+    {
+        "uri": "geiter://status",
+        "name": "Geiter status",
+        "description": "Current workspace identity and collection counts.",
+        "mimeType": "application/json",
+    },
+    {
+        "uri": "geiter://report",
+        "name": "Geiter report",
+        "description": "Current GEO analysis, health checks, and latest iteration.",
+        "mimeType": "application/json",
+    },
+]
+
 
 def _result(request_id: Any, value: Any) -> dict[str, Any]:
     return {"jsonrpc": "2.0", "id": request_id, "result": {"content": [{"type": "json", "json": value}]}}
@@ -71,13 +86,33 @@ def dispatch(store: GeiterStore, request: dict[str, Any]) -> dict[str, Any] | No
     if method == "initialize":
         return _result(request_id, {
             "protocolVersion": "2025-06-18",
-            "serverInfo": {"name": "geiter", "version": "0.4.0"},
+            "serverInfo": {"name": "geiter", "version": "0.5.0"},
             "capabilities": {"tools": {}},
         })
     if method == "notifications/initialized":
         return None
     if method == "tools/list":
         return _result(request_id, {"tools": TOOLS})
+    if method == "resources/list":
+        return _result(request_id, {"resources": RESOURCES})
+    if method == "resources/read":
+        uri = params.get("uri")
+        if uri == "geiter://status":
+            state = store.read()
+            value = {
+                "schema": state["schema"],
+                "identity": state["identity"],
+                "updated_at": state["updated_at"],
+                "counts": {key: len(state.get(key, [])) for key in (
+                    "goals", "memories", "prompts", "observations", "hypotheses",
+                    "actions", "measurements", "learnings", "iterations",
+                )},
+            }
+        elif uri == "geiter://report":
+            value = store.report()
+        else:
+            return _error(request_id, -32002, f"unknown resource: {uri}")
+        return _result(request_id, {"contents": [{"uri": uri, "mimeType": "application/json", "text": json.dumps(value, ensure_ascii=False)}]})
     if method != "tools/call":
         return _error(request_id, -32601, f"unknown method: {method}")
 

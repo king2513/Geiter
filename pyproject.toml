@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "geiter"
-version = "0.4.0"
+version = "0.5.0"
 description = "An agent-native self-iteration runtime for Generative Engine Optimization"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -13,6 +13,9 @@ authors = [{name = "Geiter contributors"}]
 
 [project.scripts]
 geiter = "geiter.cli:main"
+
+[project.entry-points."geiter.providers"]
+# Third-party packages can register `name = "package.module:factory"`.
 
 [tool.setuptools.packages.find]
 include = ["geiter*"]

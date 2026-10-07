@@ -6,7 +6,7 @@ from typing import Any
 
 from .core import GeiterStore
 from .gateway import serve
-from .providers import JsonlProvider, observe_prompts
+from .providers import load_provider, observe_prompts
 
 
 def parser() -> argparse.ArgumentParser:
@@ -37,8 +37,8 @@ def parser() -> argparse.ArgumentParser:
     observe.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
 
     run = commands.add_parser("run", help="Run a provider across all prompts")
-    run.add_argument("--provider", choices=("jsonl",), required=True)
-    run.add_argument("--fixture", required=True, help="Path to JSONL provider fixture")
+    run.add_argument("--provider", required=True)
+    run.add_argument("--fixture", help="Path to JSONL provider fixture")
     run.add_argument("--target")
     run.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
 
@@ -123,7 +123,9 @@ def main(argv: list[str] | None = None) -> None:
             args.target,
         )
     elif args.command == "run":
-        provider = JsonlProvider(args.fixture)
+        if args.provider == "jsonl" and not args.fixture:
+            raise SystemExit("run --provider jsonl requires --fixture")
+        provider = load_provider(args.provider, path=args.fixture)
         result = {
             "provider": provider.name,
             "observations": observe_prompts(store, store.prompts(), provider, args.target),

@@ -14,6 +14,8 @@ The first release is dependency-free:
 - stdio JSON-RPC gateway for agent and MCP-style callers
 - `doctor` consistency checks and `report` snapshots
 - replayable provider adapters and batch observation runs
+- installable provider plugins through `geiter.providers` entry points
+- MCP-style resources for status and reports
 - a deterministic loop: `inspect -> hypothesize -> act -> measure -> learn`
 
 ## Quick start
@@ -110,6 +112,18 @@ Provider fixtures are JSONL so runs are deterministic and reviewable:
 ```json
 {"prompt":"What is Geiter?","provider":"replay","answer":"Geiter is an agent-native GEO runtime.","citations":["https://geiter.dev/docs"]}
 ```
+
+### Provider plugins
+
+Third-party packages can register a provider without changing Geiter:
+
+```toml
+[project.entry-points."geiter.providers"]
+my-provider = "my_package.provider:factory"
+```
+
+The factory receives provider-specific keyword arguments and returns an object
+implementing `answer(prompt) -> {provider, answer, citations}`.
 
 ## Roadmap
 

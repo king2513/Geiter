@@ -5,7 +5,7 @@ from pathlib import Path
 
 from geiter.core import GeiterStore
 from geiter.gateway import dispatch
-from geiter.providers import JsonlProvider, observe_prompts
+from geiter.providers import JsonlProvider, load_provider, observe_prompts
 
 
 class GeiterStoreTests(unittest.TestCase):
@@ -109,3 +109,33 @@ class GeiterStoreTests(unittest.TestCase):
         observations = observe_prompts(self.store, [prompt], JsonlProvider(fixture))
         self.assertEqual(len(observations), 1)
         self.assertEqual(observations[0]["data"]["provider"], "replay")
+        self.assertEqual(load_provider("jsonl", path=fixture).name, "jsonl")
+
+    def test_gateway_exposes_resources(self):
+        self.store.init()
+        listed = dispatch(self.store, {"jsonrpc": "2.0", "id": 4, "method": "resources/list"})
+        uris = {item["uri"] for item in listed["result"]["content"][0]["json"]["resources"]}
+        self.assertEqual(uris, {"geiter://status", "geiter://report"})
+        read = dispatch(self.store, {
+            "jsonrpc": "2.0", "id": 5, "method": "resources/read",
+            "params": {"uri": "geiter://status"},
+        })
+        self.assertEqual(read["result"]["content"][0]["json"]["contents"][0]["uri"], "geiter://status")
+
+    def test_provider_plugins_are_discovered(self):
+        from unittest.mock import patch
+
+        class FakeEntryPoint:
+            def load(self):
+                return lambda **_kwargs: JsonlProvider.__new__(JsonlProvider)
+
+        class FakeEntryPoints(list):
+            def select(self, *, group, name):
+                self.assertions = (group, name)
+                return self
+
+        entries = FakeEntryPoints([FakeEntryPoint()])
+        with patch("geiter.providers.entry_points", return_value=entries):
+            provider = load_provider("custom")
+        self.assertIsInstance(provider, JsonlProvider)
+        self.assertEqual(entries.assertions, ("geiter.providers", "custom"))

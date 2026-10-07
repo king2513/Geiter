@@ -23,6 +23,8 @@ For process-based integrations, run `python -m geiter gateway` and send one
 JSON-RPC request per line over stdin. Responses are one JSON object per line.
 The gateway currently exposes `geiter_status`, `geiter_add_prompt`,
 `geiter_record_observation`, `geiter_analyze`, and `geiter_report`.
+It also exposes `geiter://status` and `geiter://report` resources through
+`resources/list` and `resources/read`.
 
 ## Stability rules
 
@@ -52,6 +54,13 @@ answer(prompt) -> { provider, answer, citations[] }
 
 The built-in JSONL adapter is replay-only and has no network access. This makes
 regression runs safe to commit as fixtures and compare across Geiter versions.
+
+Installed provider plugins are discovered through the `geiter.providers` Python
+entry-point group. A plugin factory must return an object with:
+
+```python
+answer(prompt: str) -> ProviderAnswer
+```
 
 Use `target_citation_rate` for source attribution. `citation_rate` alone only
 means the provider returned some citation.

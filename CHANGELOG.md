@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.0 - 2026-10-07
+
+- added provider entry-point discovery for third-party adapters
+- added MCP-style `resources/list` and `resources/read`
+- documented plugin contracts and resource URIs
+
 ## 0.4.0 - 2026-10-07
 
 - added provider protocol and deterministic JSONL replay adapter
