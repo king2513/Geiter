@@ -211,7 +211,7 @@ def dispatch(store: GeiterStore, request: dict[str, Any]) -> dict[str, Any] | No
     if method == "initialize":
         return _result(request_id, {
             "protocolVersion": "2025-06-18",
-            "serverInfo": {"name": "geiter", "version": "1.12.0"},
+            "serverInfo": {"name": "geiter", "version": "1.12.1"},
             "capabilities": {"tools": {}, "resources": {}},
         })
     if method == "notifications/initialized":
@@ -233,6 +233,7 @@ def dispatch(store: GeiterStore, request: dict[str, Any]) -> dict[str, Any] | No
                 "actions", "measurements", "learnings", "iterations",
                 "baselines", "experiments",
                 )},
+                "open_action_count": len(store.list_actions()),
             }
         elif uri == "geiter://report":
             value = store.report()
@@ -257,6 +258,7 @@ def dispatch(store: GeiterStore, request: dict[str, Any]) -> dict[str, Any] | No
                     "goals", "memories", "prompts", "observations", "hypotheses",
                     "actions", "measurements", "learnings", "iterations",
                 )},
+                "open_action_count": len(store.list_actions()),
             }
         elif name == "geiter_capabilities":
             value = store.capabilities()

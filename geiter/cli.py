@@ -144,6 +144,7 @@ def main(argv: list[str] | None = None) -> None:
             "actions", "measurements", "learnings", "iterations", "baselines", "experiments",
                 "runs",
             )},
+            "open_action_count": len(store.list_actions()),
         }
     elif args.command == "inspect":
         result = store.inspect()

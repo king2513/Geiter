@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.12.1 - 2026-10-08
+
+- surfaced open action counts and prioritized action records in status and reports
+- documented the action queue contract in capabilities metadata
+
 ## 1.12.0 - 2026-10-08
 
 - added a persistent, priority-ordered agent action queue

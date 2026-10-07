@@ -377,6 +377,15 @@ class GeiterStoreTests(unittest.TestCase):
         self.assertEqual(repeated["data"]["completion_evidence"], {"ticket": "evidence-1"})
         self.assertEqual([item["id"] for item in self.store.list_actions()], [normal["id"]])
 
+    def test_status_report_and_capabilities_surface_open_actions(self):
+        self.store.init()
+        action = self.store.propose_action("review", "Review evidence")
+        report = self.store.report()
+        self.assertEqual(report["open_action_count"], 1)
+        self.assertEqual(report["open_actions"][0]["id"], action["id"])
+        capabilities = self.store.capabilities()
+        self.assertEqual(capabilities["action_queue"]["record_kind"], "agent.action")
+
     def test_gateway_manages_persisted_actions(self):
         self.store.init()
         action = self.store.propose_action("repair", "Fix fixture", priority="high")

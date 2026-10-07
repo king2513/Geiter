@@ -340,7 +340,7 @@ class GeiterStore:
         """Return a stable machine-readable description of Geiter's contract."""
         return {
             "schema": "geiter/capabilities-v1",
-            "version": "1.12.0",
+            "version": "1.12.1",
             "identity": self.read()["identity"],
             "state_schema": "geiter/v1",
             "report_schemas": [
@@ -362,6 +362,12 @@ class GeiterStore:
                 "gateway": "python -m geiter gateway",
                 "regression": "python -m geiter regression --provider jsonl --fixture <path> --json",
                 "iteration": "python -m geiter iterate --json",
+                "actions": "python -m geiter action list --json",
+            },
+            "action_queue": {
+                "record_kind": "agent.action",
+                "statuses": ["open", "completed"],
+                "ordering": "priority_then_created_at",
             },
             "principles": [
                 "evidence-first",
@@ -962,6 +968,8 @@ class GeiterStore:
             "experiment_count": len(state.get("experiments", [])),
             "run_count": len(state.get("runs", [])),
             "runs": state.get("runs", [])[-10:],
+            "open_action_count": len(self.list_actions()),
+            "open_actions": self.list_actions()[:20],
             "experiments": state.get("experiments", []),
             "latest_learnings": state.get("learnings", [])[-10:],
         }
