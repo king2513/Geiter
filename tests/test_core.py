@@ -153,6 +153,21 @@ class GeiterStoreTests(unittest.TestCase):
         comparison = self.store.compare()
         self.assertEqual(comparison["status"], "no_baseline")
 
+    def test_compare_rejects_unknown_baseline_without_falling_back(self):
+        self.store.init()
+        prompt = self.store.add_prompt("What is Geiter?")
+        self.store.record_observation(
+            prompt["id"],
+            "fixture",
+            "Geiter is an agent-native GEO runtime.",
+            ["https://geiter.dev/docs"],
+        )
+        self.store.save_baseline("known")
+        comparison = self.store.compare("baseline_missing")
+        self.assertEqual(comparison["status"], "unknown_baseline")
+        self.assertEqual(comparison["baseline_id"], "baseline_missing")
+        self.assertNotIn("baseline", comparison)
+
     def test_matrix_groups_provider_and_intent_and_finds_weakest(self):
         self.store.init()
         prompt_a = self.store.add_prompt("What is Geiter?", "discovery")
@@ -539,6 +554,12 @@ class GeiterStoreTests(unittest.TestCase):
         self.assertEqual(result["gate"]["schema"], "geiter/gate-v1")
         self.assertEqual(result["gate"]["checks"][1]["name"], "run_completed")
         self.assertEqual(result["gate"]["action"]["type"], "continue")
+        stored_run = self.store.run(result["run"]["id"])
+        self.assertEqual(stored_run["data"]["gate"]["run_id"], result["run"]["id"])
+        report = self.store.report()
+        self.assertEqual(report["latest_gate"]["run_id"], result["run"]["id"])
+        context = self.store.context()
+        self.assertEqual(context["decision"]["latest_gate"]["ok"], True)
 
     def test_regression_gate_rejects_empty_batches(self):
         self.store.init()
@@ -548,6 +569,25 @@ class GeiterStoreTests(unittest.TestCase):
         self.assertFalse(checks["prompts_present"])
         self.assertEqual(result["gate"]["action"]["type"], "add_prompts")
         self.assertEqual(result["gate"]["action_record"]["data"]["status"], "open")
+
+    def test_regression_gate_rejects_unknown_baseline_reference(self):
+        self.store.init()
+        self.store.add_prompt("What is Geiter?")
+        result = regression_run(
+            self.store,
+            self.store.prompts(),
+            load_provider("fixture"),
+            baseline_id="baseline_missing",
+        )
+        gate = result["gate"]
+        self.assertFalse(gate["ok"])
+        self.assertEqual(gate["comparison"]["status"], "unknown_baseline")
+        self.assertEqual(gate["action"]["type"], "select_valid_baseline")
+        self.assertIn("baseline_comparison", gate["failed_checks"])
+        self.assertEqual(
+            self.store.report()["latest_gate"]["comparison_status"],
+            "unknown_baseline",
+        )
 
     def test_regression_gate_compares_only_the_current_run_and_accepts_flat(self):
         self.store.init()
@@ -675,6 +715,14 @@ class GeiterStoreTests(unittest.TestCase):
         self.assertEqual(capabilities["action_queue"]["record_kind"], "agent.action")
         self.assertIn("propose", capabilities["action_queue"]["operations"])
         self.assertTrue(capabilities["providers"]["built_in"]["http_json"]["network"])
+        self.assertEqual(
+            capabilities["regression_gate"]["passing_verdicts"],
+            ["improved", "flat"],
+        )
+        self.assertEqual(
+            capabilities["regression_gate"]["persisted_on"],
+            "runs[].data.gate",
+        )
         self.store.claim_action(action["id"], "itr_test")
         active_report = self.store.report()
         self.assertEqual(active_report["open_action_count"], 0)

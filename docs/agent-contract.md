@@ -65,6 +65,10 @@ its `run_id`, so the gate never mixes another post-baseline run into the
 current comparison. `improved` and `flat` verdicts pass. `regressed`,
 `mixed`, and `insufficient_data` fail with typed actions; `no_baseline` keeps
 the pre-1.18 run-quality behavior and is explicitly reported.
+An unknown `baseline_id` is reported as `comparison.status =
+unknown_baseline` and never falls back to another baseline. The compact gate
+summary is persisted at `runs[].data.gate`, surfaced as `latest_gate` in
+`report`, and exposed as `decision.latest_gate` in the bounded context packet.
 The gate action is also persisted as an `agent.action` record. `iterate`
 claims the highest-priority open action and records it in the iteration trace;
 claiming does not imply that external work was completed.

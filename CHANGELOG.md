@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.19.0 - 2026-10-08
+
+- rejected unknown baseline IDs instead of silently comparing against the newest baseline
+- persisted regression gate summaries on provider runs and surfaced the latest gate in reports
+- exposed latest gate decisions through bounded agent context and capabilities metadata
+
 ## 1.18.0 - 2026-10-07
 
 - made regression gates baseline-aware without changing no-baseline compatibility

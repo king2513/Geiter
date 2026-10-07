@@ -387,7 +387,10 @@ class GeiterStore:
                 "connect": "python -m geiter connect --format generic --json",
                 "gateway": "python -m geiter gateway",
                 "run": "python -m geiter run --provider <name> [provider options] --json",
-                "regression": "python -m geiter regression --provider <name> [provider options] --json",
+                "regression": (
+                    "python -m geiter regression --provider <name> "
+                    "[provider options] [--baseline-id <id>] --json"
+                ),
                 "resume": "python -m geiter resume <run-id> --provider <name> [provider options] --json",
                 "iteration": "python -m geiter iterate --json",
                 "context": "python -m geiter context --json",
@@ -407,6 +410,14 @@ class GeiterStore:
                     },
                 },
                 "plugin_entrypoint": "geiter.providers",
+            },
+            "regression_gate": {
+                "schema": "geiter/gate-v1",
+                "comparison_statuses": ["no_baseline", "unknown_baseline", "compared"],
+                "verdicts": ["improved", "flat", "regressed", "mixed", "insufficient_data"],
+                "passing_verdicts": ["improved", "flat"],
+                "persisted_on": "runs[].data.gate",
+                "latest_report_field": "latest_gate",
             },
             "action_queue": {
                 "record_kind": "agent.action",
@@ -448,9 +459,16 @@ class GeiterStore:
         report = self.report()
         latest_iteration = report["latest_iteration"]
         latest_learning = report["latest_learnings"][-1] if report["latest_learnings"] else None
+        latest_gate = report.get("latest_gate")
         next_prompt = (
             latest_learning.get("data", {}).get("next_prompt")
             if latest_learning else None
+        )
+        gate_context = self._gate_context(latest_gate)
+        next_action = (
+            latest_gate.get("action", {}).get("prompt")
+            if latest_gate and not latest_gate.get("ok") and latest_gate.get("action")
+            else report["analysis"].get("next_action")
         )
         return {
             "schema": "geiter/context-v1",
@@ -459,8 +477,8 @@ class GeiterStore:
             "capabilities": self.capabilities(),
             "status": self.status(),
             "decision": {
-                "next_action": report["analysis"].get("next_action"),
-                "next_prompt": next_prompt or report["analysis"].get("next_action"),
+                "next_action": next_action,
+                "next_prompt": next_prompt or next_action,
                 "open_actions": report["open_actions"][:10],
                 "in_progress_actions": report["in_progress_actions"][:10],
                 "stale_actions": report["stale_actions"][:10],
@@ -468,6 +486,7 @@ class GeiterStore:
                     item["data"].get("status") == "approved"
                     for item in report["experiments"]
                 ),
+                "latest_gate": gate_context,
             },
             "quality": {
                 "health": report["health"],
@@ -782,6 +801,15 @@ class GeiterStore:
                 "priority": "critical",
                 "prompt": "Run doctor, repair workspace consistency failures, then rerun the regression gate.",
             }
+        elif comparison_status == "unknown_baseline":
+            action = {
+                "type": "select_valid_baseline",
+                "priority": "high",
+                "prompt": (
+                    "Select an existing baseline or save a new one, then rerun the "
+                    "regression gate with that baseline reference."
+                ),
+            }
         elif comparison_verdict == "regressed":
             action = {
                 "type": "recover_regression",
@@ -817,7 +845,7 @@ class GeiterStore:
             "comparison_verdict": comparison_verdict,
             "comparison_delta": comparison.get("delta"),
         }
-        return {
+        gate = {
             "schema": "geiter/gate-v1",
             "ok": not failed,
             "run_id": run["id"],
@@ -840,11 +868,43 @@ class GeiterStore:
             "doctor": doctor,
             "next_action": "Regression gate passed." if not failed
             else (
-                "Repair failed checks before trusting this regression run."
-                if comparison_status != "compared" or comparison_verdict not in {"regressed", "mixed", "insufficient_data"}
-                else f"Comparison verdict is {comparison_verdict}; follow the typed action before proceeding."
+                "Select a valid baseline before trusting this regression run."
+                if comparison_status == "unknown_baseline"
+                else (
+                    "Repair failed checks before trusting this regression run."
+                    if comparison_status != "compared"
+                    or comparison_verdict not in {"regressed", "mixed", "insufficient_data"}
+                    else f"Comparison verdict is {comparison_verdict}; follow the typed action before proceeding."
+                )
             ),
         }
+        persisted_gate = {
+            **self._gate_context(gate),
+            "generated_at": now(),
+            "summary": summary,
+            "comparison": comparison,
+        }
+        persisted_gate["action"] = action
+        persisted_gate["action_id"] = gate["action_record"]["id"]
+        state = self.read()
+        stored_run = next((item for item in state.get("runs", []) if item["id"] == run["id"]), None)
+        if stored_run is not None:
+            stored_run["data"]["gate"] = persisted_gate
+            self._write(state)
+            self.event(
+                "runs.gated",
+                {
+                    "run_id": run["id"],
+                    "ok": gate["ok"],
+                    "baseline_id": gate["baseline_id"],
+                    "comparison_status": comparison_status,
+                    "comparison_verdict": comparison_verdict,
+                    "failed_checks": gate["failed_checks"],
+                    "action_id": gate["action_record"]["id"],
+                },
+            )
+        run["data"]["gate"] = persisted_gate
+        return gate
 
     def add_prompt(self, text: str, intent: str | None = None) -> dict[str, Any]:
         normalized = " ".join(text.split())
@@ -1076,12 +1136,29 @@ class GeiterStore:
         state = self.read()
         baselines = state.get("baselines", [])
         if not baselines:
+            if baseline_id is not None:
+                return {
+                    "schema": "geiter/comparison-v1",
+                    "status": "unknown_baseline",
+                    "baseline_id": baseline_id,
+                    "next_action": "The requested baseline does not exist; save or select a valid baseline.",
+                }
             return {
                 "schema": "geiter/comparison-v1",
                 "status": "no_baseline",
                 "next_action": "Save a baseline before comparing future observations.",
             }
-        baseline = next((item for item in baselines if item["id"] == baseline_id), baselines[-1])
+        if baseline_id is None:
+            baseline = baselines[-1]
+        else:
+            baseline = next((item for item in baselines if item["id"] == baseline_id), None)
+            if baseline is None:
+                return {
+                    "schema": "geiter/comparison-v1",
+                    "status": "unknown_baseline",
+                    "baseline_id": baseline_id,
+                    "next_action": "The requested baseline does not exist; select a valid baseline.",
+                }
         baseline_observation_ids = set(baseline["data"].get("observation_ids", []))
         current_observations = [
             item for item in state.get("observations", [])
@@ -1318,6 +1395,17 @@ class GeiterStore:
         state = self.read()
         analysis = self.analyze()
         doctor = self.doctor()
+        gated_runs = [
+            item for item in state.get("runs", [])
+            if item.get("data", {}).get("gate")
+        ]
+        latest_gate = (
+            max(
+                gated_runs,
+                key=lambda item: item["data"]["gate"].get("generated_at", item["created_at"]),
+            )["data"]["gate"]
+            if gated_runs else None
+        )
         return {
             "schema": "geiter/report-v1",
             "generated_at": now(),
@@ -1328,6 +1416,7 @@ class GeiterStore:
             "matrix": self.analyze_matrix(),
             "health": self.health(),
             "doctor": doctor,
+            "latest_gate": latest_gate,
             "latest_iteration": state["iterations"][-1] if state["iterations"] else None,
             "event_count": len(self.events(limit=100000)),
             "baseline_count": len(state.get("baselines", [])),
@@ -1342,4 +1431,25 @@ class GeiterStore:
             "stale_actions": self.stale_actions()[:20],
             "experiments": state.get("experiments", []),
             "latest_learnings": state.get("learnings", [])[-10:],
+        }
+
+    @staticmethod
+    def _gate_context(gate: dict[str, Any] | None) -> dict[str, Any] | None:
+        if not gate:
+            return None
+        comparison = gate.get("comparison", {})
+        pairing = comparison.get("pairing", {})
+        return {
+            "schema": gate.get("schema", "geiter/gate-v1"),
+            "run_id": gate.get("run_id"),
+            "provider": gate.get("provider"),
+            "ok": gate.get("ok"),
+            "baseline_id": gate.get("baseline_id"),
+            "comparison_status": comparison.get("status"),
+            "comparison_verdict": comparison.get("verdict"),
+            "comparison_delta": comparison.get("delta"),
+            "pair_count": pairing.get("pair_count", 0),
+            "failed_checks": gate.get("failed_checks", []),
+            "action": gate.get("action"),
+            "next_action": gate.get("next_action"),
         }

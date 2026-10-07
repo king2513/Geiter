@@ -28,6 +28,7 @@ Geiter is an agent-native runtime for Generative Engine Optimization (GEO). It g
 - zero-dependency `http_json` provider for opt-in live retrieval
 - installable provider plugins through `geiter.providers` entry points
 - baseline snapshots and delta comparisons between observation batches
+- durable regression gate verdicts available after the original run response
 - policy-gated experiment proposals with explicit approval
 - experiment result ledger linking evidence, comparisons, and learnings
 - evidence-aware `iterate` cycles that consume comparisons and pending experiments
@@ -181,6 +182,13 @@ action that tells the next agent what evidence or repair is required. Without
 a baseline, the original run-quality gate remains compatible and reports
 `comparison.status = no_baseline`. Agents and CI can use this as a single
 machine-readable contract without interpreting prose.
+
+The gate summary is persisted on the provider run at
+`runs[].data.gate`. `report --json` exposes the newest one as
+`latest_gate`; `context --json` exposes a bounded form as
+`decision.latest_gate`. Supplying an unknown `--baseline-id` fails explicitly
+with `comparison.status = unknown_baseline` and a `select_valid_baseline`
+action instead of silently selecting another baseline.
 
 `geiter://capabilities` is the stable discovery surface for agents: it reports
 the version, state and report schemas, transport, entrypoints, and operating
