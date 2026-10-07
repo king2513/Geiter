@@ -111,7 +111,7 @@ printf '%s\n' \
   | python -m geiter gateway
 ```
 
-Tools include `geiter_status`, `geiter_add_prompt`, `geiter_record_observation`, `geiter_analyze`, `geiter_report`, `geiter_resume`, and `geiter_regression`. Resources include `geiter://status` and `geiter://report`.
+Tools include `geiter_status`, `geiter_add_prompt`, `geiter_record_observation`, `geiter_analyze`, `geiter_report`, `geiter_resume`, `geiter_regression`, and `geiter_capabilities`. Resources include `geiter://status`, `geiter://report`, and `geiter://capabilities`.
 
 To resume a provider run from an agent client:
 
@@ -140,6 +140,10 @@ The built-in JSONL adapter is replay-only and has no network access, which keeps
 `geiter/gate-v1` object with an `ok` boolean, named checks, health diagnostics,
 the run ID, and a typed `action` for the next step. Agents and CI can use this
 as a single pass/fail contract without interpreting prose.
+
+`geiter://capabilities` is the stable discovery surface for agents: it reports
+the version, state and report schemas, transport, entrypoints, and operating
+principles without changing workspace state.
 
 Every batch run creates a durable run ledger. Provider exceptions are recorded
 per prompt, successful observations are preserved, and the batch finishes as

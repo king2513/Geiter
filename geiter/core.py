@@ -336,6 +336,41 @@ class GeiterStore:
             "protocol": "json-rpc",
         }
 
+    def capabilities(self) -> dict[str, Any]:
+        """Return a stable machine-readable description of Geiter's contract."""
+        return {
+            "schema": "geiter/capabilities-v1",
+            "version": "1.11.0",
+            "identity": self.read()["identity"],
+            "state_schema": "geiter/v1",
+            "report_schemas": [
+                "geiter/analysis-v1",
+                "geiter/health-v1",
+                "geiter/matrix-v1",
+                "geiter/comparison-v1",
+                "geiter/doctor-v1",
+                "geiter/report-v1",
+                "geiter/gate-v1",
+            ],
+            "transport": {
+                "kind": "stdio",
+                "protocol": "json-rpc",
+                "protocol_version": "2025-06-18",
+            },
+            "entrypoints": {
+                "connect": "python -m geiter connect --format generic --json",
+                "gateway": "python -m geiter gateway",
+                "regression": "python -m geiter regression --provider jsonl --fixture <path> --json",
+                "iteration": "python -m geiter iterate --json",
+            },
+            "principles": [
+                "evidence-first",
+                "replay-before-reach",
+                "agent-first",
+                "external-effects-require-policy",
+            ],
+        }
+
     def regression_gate(self, run: dict[str, Any]) -> dict[str, Any]:
         """Evaluate a provider run and workspace health as one machine gate."""
         health = self.health()

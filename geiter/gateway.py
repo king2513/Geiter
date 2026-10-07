@@ -165,6 +165,12 @@ RESOURCES = [
         "description": "Current GEO analysis, health checks, and latest iteration.",
         "mimeType": "application/json",
     },
+    {
+        "uri": "geiter://capabilities",
+        "name": "Geiter capabilities",
+        "description": "Stable version, transport, schema, and agent entrypoint metadata.",
+        "mimeType": "application/json",
+    },
 ]
 
 
@@ -185,7 +191,7 @@ def dispatch(store: GeiterStore, request: dict[str, Any]) -> dict[str, Any] | No
     if method == "initialize":
         return _result(request_id, {
             "protocolVersion": "2025-06-18",
-            "serverInfo": {"name": "geiter", "version": "1.10.0"},
+            "serverInfo": {"name": "geiter", "version": "1.11.0"},
             "capabilities": {"tools": {}, "resources": {}},
         })
     if method == "notifications/initialized":
@@ -210,6 +216,8 @@ def dispatch(store: GeiterStore, request: dict[str, Any]) -> dict[str, Any] | No
             }
         elif uri == "geiter://report":
             value = store.report()
+        elif uri == "geiter://capabilities":
+            value = store.capabilities()
         else:
             return _error(request_id, -32002, f"unknown resource: {uri}")
         return _result(request_id, {"contents": [{"uri": uri, "mimeType": "application/json", "text": json.dumps(value, ensure_ascii=False)}]})
@@ -230,6 +238,8 @@ def dispatch(store: GeiterStore, request: dict[str, Any]) -> dict[str, Any] | No
                     "actions", "measurements", "learnings", "iterations",
                 )},
             }
+        elif name == "geiter_capabilities":
+            value = store.capabilities()
         elif name == "geiter_add_prompt":
             value = store.add_prompt(args["text"], args.get("intent"))
         elif name == "geiter_record_observation":

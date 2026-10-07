@@ -40,6 +40,8 @@ The gateway currently exposes `geiter_status`, `geiter_add_prompt`,
 `fixture` for the built-in JSONL provider.
 `geiter_connect` returns the same configuration shape as the CLI and never
 writes client configuration files.
+`geiter_capabilities` and `geiter://capabilities` expose the same stable
+capability document, including version, schemas, transport, and entrypoints.
 `geiter_regression` runs the configured prompts against a provider and returns
 a `geiter/gate-v1` payload containing an `ok` boolean, named checks, failed
 check names, and a typed next-step `action`.

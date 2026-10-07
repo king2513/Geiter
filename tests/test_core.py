@@ -183,6 +183,25 @@ class GeiterStoreTests(unittest.TestCase):
         invalid = dispatch(self.store, {"jsonrpc": "1.0", "id": 16, "method": "tools/list"})
         self.assertEqual(invalid["error"]["code"], -32600)
 
+    def test_capabilities_are_available_as_resource_and_tool(self):
+        self.store.init()
+        listed = dispatch(self.store, {"jsonrpc": "2.0", "id": 17, "method": "resources/list"})
+        uris = {item["uri"] for item in listed["result"]["content"][0]["json"]["resources"]}
+        self.assertIn("geiter://capabilities", uris)
+        resource = dispatch(self.store, {
+            "jsonrpc": "2.0", "id": 18, "method": "resources/read",
+            "params": {"uri": "geiter://capabilities"},
+        })
+        resource_value = json.loads(
+            resource["result"]["content"][0]["json"]["contents"][0]["text"]
+        )
+        tool = dispatch(self.store, {
+            "jsonrpc": "2.0", "id": 19, "method": "tools/call",
+            "params": {"name": "geiter_capabilities", "arguments": {}},
+        })
+        self.assertEqual(resource_value, tool["result"]["content"][0]["json"])
+        self.assertEqual(resource_value["schema"], "geiter/capabilities-v1")
+
     def test_jsonl_provider_replays_a_batch(self):
         self.store.init()
         prompt = self.store.add_prompt("What is Geiter?")
@@ -348,7 +367,7 @@ class GeiterStoreTests(unittest.TestCase):
         self.store.init()
         listed = dispatch(self.store, {"jsonrpc": "2.0", "id": 4, "method": "resources/list"})
         uris = {item["uri"] for item in listed["result"]["content"][0]["json"]["resources"]}
-        self.assertEqual(uris, {"geiter://status", "geiter://report"})
+        self.assertEqual(uris, {"geiter://status", "geiter://report", "geiter://capabilities"})
         read = dispatch(self.store, {
             "jsonrpc": "2.0", "id": 5, "method": "resources/read",
             "params": {"uri": "geiter://status"},

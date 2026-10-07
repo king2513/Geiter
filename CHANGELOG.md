@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.11.0 - 2026-10-08
+
+- added the stable `geiter://capabilities` discovery resource
+- exposed the same capability document through `geiter_capabilities`
+
 ## 1.10.0 - 2026-10-08
 
 - advertised tools and resources capabilities during gateway initialization
