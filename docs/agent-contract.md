@@ -26,9 +26,10 @@ experiment propose --hypothesis <text> --change <text> [--risk <level>] --json
 experiment approve --id <experiment-id> --json
 experiment result --id <experiment-id> --outcome <supported|rejected|inconclusive> --evidence <text> --json
 iterate [--hypothesis <text>] --json
-action list [--status <open|in_progress|completed|skipped|all>] --json
+action list [--status <open|in_progress|completed|skipped|stale|all>] --json
 action complete <action-id> [--evidence <text>] --json
 action skip <action-id> [--evidence <text>] --json
+action reclaim <action-id> [--evidence <text>] --json
 iterate [--hypothesis <text>] --json
 event list --json
 ```
@@ -54,7 +55,12 @@ claiming does not imply that external work was completed.
 `geiter_actions` lists queued actions by priority; `geiter_complete_action`
 or `geiter_skip_action` resolves one with optional evidence. Open actions with
 the same dedupe key are idempotent. Status and report payloads expose both
-`open_action_count` and `in_progress_action_count`.
+`open_action_count` and `in_progress_action_count`, plus stale action counts.
+Claims carry a one-hour lease by default. `geiter_actions` accepts the virtual
+`stale` status, and `geiter_reclaim_action` requeues an expired claim to `open`.
+Reclaiming is idempotent, preserves the prior claim metadata, and refuses active
+leases. `geiter_iterate` also reclaims stale actions before claiming the next
+priority action.
 It also exposes `geiter://status` and `geiter://report` resources through
 `resources/list` and `resources/read`.
 

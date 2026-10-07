@@ -86,9 +86,9 @@ def parser() -> argparse.ArgumentParser:
     connect.add_argument("--format", choices=("generic", "claude", "cursor", "vscode"), default="generic")
     connect.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
     action = commands.add_parser("action", help="Manage persisted agent actions")
-    action.add_argument("operation", choices=("list", "complete", "skip"))
+    action.add_argument("operation", choices=("list", "complete", "skip", "reclaim"))
     action.add_argument("action_id", nargs="?")
-    action.add_argument("--status", choices=("open", "in_progress", "completed", "skipped", "all"), default="open")
+    action.add_argument("--status", choices=("open", "in_progress", "completed", "skipped", "stale", "all"), default="open")
     action.add_argument("--evidence")
     action.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
 
@@ -146,6 +146,7 @@ def main(argv: list[str] | None = None) -> None:
             )},
             "open_action_count": len(store.list_actions()),
             "in_progress_action_count": len(store.list_actions("in_progress")),
+            "stale_action_count": len(store.stale_actions()),
         }
     elif args.command == "inspect":
         result = store.inspect()
@@ -234,11 +235,12 @@ def main(argv: list[str] | None = None) -> None:
             if not args.action_id:
                 raise SystemExit(f"action {args.operation} requires action_id")
             evidence = {"text": args.evidence} if args.evidence else None
-            result = (
-                store.complete_action(args.action_id, evidence)
-                if args.operation == "complete"
-                else store.skip_action(args.action_id, evidence)
-            )
+            if args.operation == "complete":
+                result = store.complete_action(args.action_id, evidence)
+            elif args.operation == "skip":
+                result = store.skip_action(args.action_id, evidence)
+            else:
+                result = store.reclaim_action(args.action_id, evidence)
     elif args.command == "iterate":
         result = store.iterate(args.hypothesis)
     elif args.command == "goal":

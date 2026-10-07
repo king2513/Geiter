@@ -61,6 +61,58 @@ class GeiterStoreTests(unittest.TestCase):
         resolved = self.store.skip_action(critical["id"], {"reason": "superseded"})
         self.assertEqual(resolved["data"]["status"], "skipped")
 
+    def test_stale_action_recovery_is_detectable_and_idempotent(self):
+        self.store.init()
+        action = self.store.propose_action("repair", "Repair interrupted work", priority="high")
+        claimed = self.store.claim_action(action["id"], "itr_interrupted", lease_seconds=0)
+        self.assertEqual(claimed["data"]["status"], "in_progress")
+        self.assertEqual(self.store.list_actions("stale")[0]["id"], action["id"])
+
+        reclaimed = self.store.reclaim_action(
+            action["id"],
+            {"reason": "agent_interrupted"},
+            at="2099-01-01T00:00:00+00:00",
+        )
+        repeated = self.store.reclaim_action(action["id"], {"reason": "repeat"})
+        self.assertEqual(reclaimed["data"]["status"], "open")
+        self.assertEqual(reclaimed["data"]["reclaim_count"], 1)
+        self.assertEqual(reclaimed["data"]["last_claimed_by"], "itr_interrupted")
+        self.assertEqual(repeated["data"]["reclaim_count"], 1)
+        self.assertEqual(self.store.stale_actions(), [])
+
+    def test_active_action_lease_rejects_reclaim(self):
+        self.store.init()
+        action = self.store.propose_action("repair", "Keep active work")
+        claimed = self.store.claim_action(action["id"], "itr_active", lease_seconds=3600)
+        with self.assertRaisesRegex(ValueError, "lease is still active"):
+            self.store.reclaim_action(action["id"], at=claimed["data"]["claimed_at"])
+
+    def test_recovery_does_not_touch_completed_or_skipped_actions(self):
+        self.store.init()
+        completed = self.store.propose_action("repair", "Completed repair")
+        self.store.claim_action(completed["id"], "itr_completed", lease_seconds=0)
+        self.store.complete_action(completed["id"], {"verified": True})
+        skipped = self.store.propose_action("repair", "Skipped repair")
+        self.store.claim_action(skipped["id"], "itr_skipped", lease_seconds=0)
+        self.store.skip_action(skipped["id"], {"reason": "superseded"})
+
+        self.assertEqual(
+            self.store.recover_stale_actions(at="2099-01-01T00:00:00+00:00"),
+            [],
+        )
+        self.assertEqual(self.store.read()["actions"][-2]["data"]["status"], "completed")
+        self.assertEqual(self.store.read()["actions"][-1]["data"]["status"], "skipped")
+
+    def test_iteration_recovers_stale_action_before_claiming(self):
+        self.store.init()
+        action = self.store.propose_action("repair", "Resume interrupted repair", priority="critical")
+        self.store.claim_action(action["id"], "itr_interrupted", lease_seconds=0)
+        result = self.store.iterate()
+        self.assertEqual([item["id"] for item in result["recovered_actions"]], [action["id"]])
+        self.assertEqual(result["active_action"]["id"], action["id"])
+        self.assertEqual(result["action"]["data"]["recovered_action_ids"], [action["id"]])
+        self.assertEqual(result["active_action"]["data"]["status"], "in_progress")
+
     def test_inspect_ignores_geiter_state(self):
         self.store.init()
         Path(self.tempdir.name, "notes.md").write_text("hello", encoding="utf-8")
@@ -404,6 +456,7 @@ class GeiterStoreTests(unittest.TestCase):
         self.assertEqual(active_report["open_action_count"], 0)
         self.assertEqual(active_report["in_progress_action_count"], 1)
         self.assertEqual(active_report["in_progress_actions"][0]["id"], action["id"])
+        self.assertEqual(active_report["stale_action_count"], 0)
 
     def test_gateway_manages_persisted_actions(self):
         self.store.init()
@@ -429,6 +482,32 @@ class GeiterStoreTests(unittest.TestCase):
         names = {tool["name"] for tool in listed["result"]["content"][0]["json"]["tools"]}
         self.assertIn("geiter_capabilities", names)
         self.assertIn("geiter_skip_action", names)
+        self.assertIn("geiter_reclaim_action", names)
+
+    def test_gateway_reclaims_stale_action(self):
+        self.store.init()
+        action = self.store.propose_action("repair", "Recover via gateway")
+        self.store.claim_action(action["id"], "itr_gateway", lease_seconds=0)
+        stale = dispatch(self.store, {
+            "jsonrpc": "2.0", "id": 23, "method": "tools/call",
+            "params": {"name": "geiter_actions", "arguments": {"status": "stale"}},
+        })
+        self.assertEqual(stale["result"]["content"][0]["json"][0]["id"], action["id"])
+        all_actions = dispatch(self.store, {
+            "jsonrpc": "2.0", "id": 25, "method": "tools/call",
+            "params": {"name": "geiter_actions", "arguments": {"status": "all"}},
+        })
+        self.assertEqual(all_actions["result"]["content"][0]["json"][0]["id"], action["id"])
+        reclaimed = dispatch(self.store, {
+            "jsonrpc": "2.0", "id": 24, "method": "tools/call",
+            "params": {
+                "name": "geiter_reclaim_action",
+                "arguments": {"action_id": action["id"], "evidence": {"via": "gateway"}},
+            },
+        })
+        self.assertEqual(
+            reclaimed["result"]["content"][0]["json"]["data"]["status"], "open"
+        )
 
     def test_gateway_exposes_resources(self):
         self.store.init()

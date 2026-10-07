@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.14.0 - 2026-10-07
+
+- added one-hour leases to claimed agent actions
+- added stale action discovery and idempotent reclaim through CLI and gateway
+- made `iterate` recover expired claims before selecting its next action
+
 ## 1.13.0 - 2026-10-07
 
 - made `iterate` claim the highest-priority open agent action

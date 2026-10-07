@@ -10,6 +10,7 @@ import json
 import sys
 from typing import Any
 
+from . import __version__
 from .core import GeiterStore
 from .providers import load_provider, regression_run, resume_provider
 
@@ -69,7 +70,12 @@ TOOLS = [
         "description": "List persisted agent actions ordered by priority.",
         "inputSchema": {
             "type": "object",
-            "properties": {"status": {"type": "string"}},
+            "properties": {
+                "status": {
+                    "type": "string",
+                    "enum": ["open", "in_progress", "completed", "skipped", "stale", "all"],
+                },
+            },
         },
     },
     {
@@ -87,6 +93,18 @@ TOOLS = [
     {
         "name": "geiter_skip_action",
         "description": "Skip a persisted agent action with optional evidence.",
+        "inputSchema": {
+            "type": "object",
+            "required": ["action_id"],
+            "properties": {
+                "action_id": {"type": "string"},
+                "evidence": {"type": "object"},
+            },
+        },
+    },
+    {
+        "name": "geiter_reclaim_action",
+        "description": "Requeue a stale in-progress agent action after its lease expires.",
         "inputSchema": {
             "type": "object",
             "required": ["action_id"],
@@ -228,7 +246,7 @@ def dispatch(store: GeiterStore, request: dict[str, Any]) -> dict[str, Any] | No
     if method == "initialize":
         return _result(request_id, {
             "protocolVersion": "2025-06-18",
-            "serverInfo": {"name": "geiter", "version": "1.13.0"},
+            "serverInfo": {"name": "geiter", "version": __version__},
             "capabilities": {"tools": {}, "resources": {}},
         })
     if method == "notifications/initialized":
@@ -252,6 +270,7 @@ def dispatch(store: GeiterStore, request: dict[str, Any]) -> dict[str, Any] | No
                 )},
                 "open_action_count": len(store.list_actions()),
                 "in_progress_action_count": len(store.list_actions("in_progress")),
+                "stale_action_count": len(store.stale_actions()),
             }
         elif uri == "geiter://report":
             value = store.report()
@@ -278,6 +297,7 @@ def dispatch(store: GeiterStore, request: dict[str, Any]) -> dict[str, Any] | No
                 )},
                 "open_action_count": len(store.list_actions()),
                 "in_progress_action_count": len(store.list_actions("in_progress")),
+                "stale_action_count": len(store.stale_actions()),
             }
         elif name == "geiter_capabilities":
             value = store.capabilities()
@@ -295,11 +315,14 @@ def dispatch(store: GeiterStore, request: dict[str, Any]) -> dict[str, Any] | No
         elif name == "geiter_runs":
             value = store.list_records("runs")[-20:]
         elif name == "geiter_actions":
-            value = store.list_actions(args.get("status", "open"))
+            status = args.get("status", "open")
+            value = store.list_actions(None if status == "all" else status)
         elif name == "geiter_complete_action":
             value = store.complete_action(args["action_id"], args.get("evidence"))
         elif name == "geiter_skip_action":
             value = store.skip_action(args["action_id"], args.get("evidence"))
+        elif name == "geiter_reclaim_action":
+            value = store.reclaim_action(args["action_id"], args.get("evidence"))
         elif name == "geiter_connect":
             connection = store.connection_config()
             output_format = args.get("format", "generic")

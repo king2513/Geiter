@@ -12,7 +12,8 @@ class ProjectContractTests(unittest.TestCase):
         pyproject = (self.root / "pyproject.toml").read_text(encoding="utf-8")
         gateway = (self.root / "geiter" / "gateway.py").read_text(encoding="utf-8")
         self.assertIn(f'version = "{geiter.__version__}"', pyproject)
-        self.assertIn(f'"version": "{geiter.__version__}"', gateway)
+        self.assertIn("from . import __version__", gateway)
+        self.assertIn('"version": __version__', gateway)
 
     def test_readme_is_utf8_and_agent_positioned(self):
         readme = (self.root / "README.md").read_text(encoding="utf-8")
@@ -26,6 +27,7 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn("geiter://capabilities", readme)
         self.assertIn("action list", readme)
         self.assertIn("action skip", readme)
+        self.assertIn("action reclaim", readme)
 
     def test_release_workflow_is_tagged(self):
         workflow = (self.root / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")

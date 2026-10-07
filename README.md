@@ -30,6 +30,7 @@ Geiter is an agent-native runtime for Generative Engine Optimization (GEO). It g
 - experiment result ledger linking evidence, comparisons, and learnings
 - evidence-aware `iterate` cycles that consume comparisons and pending experiments
 - persistent prioritized agent action queue with evidence-backed completion
+- lease-backed action recovery for interrupted agent work
 - provider/intent coverage matrix with weakest-cell recommendations
 - zero runtime dependencies; Python 3.10+
 
@@ -58,8 +59,10 @@ python -m geiter experiment propose --hypothesis "Improve citation rate" --chang
 python -m geiter experiment result --id <experiment-id> --outcome supported --evidence "Citation rate improved" --json
 python -m geiter iterate --json
 python -m geiter action list --json
+python -m geiter action list --status stale --json
 python -m geiter action complete <action-id> --evidence "Verified the repair" --json
 python -m geiter action skip <action-id> --evidence "Superseded by a newer experiment" --json
+python -m geiter action reclaim <action-id> --evidence "Previous agent stopped responding" --json
 ```
 
 Replay a deterministic provider batch:
@@ -115,7 +118,7 @@ printf '%s\n' \
   | python -m geiter gateway
 ```
 
-Tools include `geiter_status`, `geiter_add_prompt`, `geiter_record_observation`, `geiter_analyze`, `geiter_report`, `geiter_resume`, `geiter_regression`, `geiter_actions`, `geiter_complete_action`, and `geiter_capabilities`. Resources include `geiter://status`, `geiter://report`, and `geiter://capabilities`.
+Tools include `geiter_status`, `geiter_add_prompt`, `geiter_record_observation`, `geiter_analyze`, `geiter_report`, `geiter_resume`, `geiter_regression`, `geiter_actions`, `geiter_complete_action`, `geiter_skip_action`, `geiter_reclaim_action`, and `geiter_capabilities`. Resources include `geiter://status`, `geiter://report`, and `geiter://capabilities`.
 
 To resume a provider run from an agent client:
 
@@ -154,7 +157,11 @@ highest-priority open action without pretending to execute external work.
 Agents can inspect them by priority with `action list`, then complete or skip
 them with evidence using `action complete` or `action skip`.
 Reports distinguish open work from in-progress work so claimed actions remain
-visible across processes.
+visible across processes. Claims carry a one-hour lease by default. Interrupted
+claims appear under `action list --status stale` and can be requeued with
+`action reclaim`; reclaiming is idempotent and never changes completed or skipped
+actions. A normal `iterate` cycle also reclaims expired work before selecting
+its next action.
 
 Every batch run creates a durable run ledger. Provider exceptions are recorded
 per prompt, successful observations are preserved, and the batch finishes as
