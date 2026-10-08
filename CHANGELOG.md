@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.23.0 - 2026-10-08
+
+- added a reentrant cross-process file lock around every state-mutating operation to prevent lost updates when multiple agents share a workspace
+- used platform-native advisory locking (`fcntl.flock` / `msvcrt.locking`) with a sidecar `.geiter/state.lock` file, keeping the runtime dependency-free
+- made nested store calls safe so operations such as `iterate` -> `inspect` -> `add` re-enter the lock instead of deadlocking
+- added deterministic tests proving mutating methods hold the lock and that concurrent threads and processes never lose an update
+
 ## 1.22.0 - 2026-10-08
 
 - added a direction-safe north-star score (`geiter/score-v1`) that aggregates mention, target citation, citation rank, and coverage into one 0-100 value with a `weakest_dimension`

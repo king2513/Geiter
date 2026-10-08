@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 
 import geiter
-from geiter.core import GeiterStore
+from geiter.core import FileLock, GeiterStore
 from geiter.gateway import dispatch
 from geiter.providers import (
     FixtureProvider,
@@ -33,6 +33,93 @@ class GeiterStoreTests(unittest.TestCase):
         self.assertEqual(first["schema"], "geiter/v1")
         self.assertEqual(second["created_at"], first["created_at"])
         self.assertTrue(self.store.state_path.exists())
+
+    def test_state_lock_serializes_concurrent_writes(self):
+        """Concurrent threads must not lose an update to the state file."""
+        import threading
+
+        self.store.init()
+        errors: list[Exception] = []
+
+        def worker(index: int) -> None:
+            try:
+                for item in range(20):
+                    self.store.add("memories", "fact", {"text": f"memory-{index}-{item}"})
+            except Exception as exc:  # pragma: no cover - surfaced via assert
+                errors.append(exc)
+
+        threads = [threading.Thread(target=worker, args=(i,)) for i in range(8)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        self.assertEqual(errors, [])
+        self.assertEqual(len(self.store.read()["memories"]), 8 * 20)
+
+    def test_mutating_methods_hold_the_state_lock(self):
+        """Every state-mutating method must run while the cross-process lock is held."""
+        self.store.init()
+        observed: list[int] = []
+        original_enter = FileLock.__enter__
+
+        def spy_enter(self_lock: FileLock) -> FileLock:
+            observed.append(self_lock._depth)
+            return original_enter(self_lock)
+
+        FileLock.__enter__ = spy_enter  # type: ignore[method-assign]
+        try:
+            self.store.add("memories", "fact", {"text": "a"})
+            self.store.add_prompt("What is Geiter?")
+            prompt = self.store.read()["prompts"][0]
+            self.store.record_observation(prompt["id"], "p", "Geiter", ["https://geiter.dev/x"])
+            self.store.iterate("hold the lock")
+        finally:
+            FileLock.__enter__ = original_enter  # type: ignore[method-assign]
+        # Each mutating call entered the lock; nested calls re-enter at greater depth.
+        self.assertGreaterEqual(len(observed), 8)
+        self.assertTrue(any(depth > 1 for depth in observed))
+
+    def test_state_lock_is_reentrant_for_nested_store_calls(self):
+        """Nested mutating calls (iterate -> inspect -> add) must not deadlock."""
+        self.store.init()
+        result = self.store.iterate("nested reentrancy check")
+        self.assertIsNotNone(result["id"])
+        # Re-entering an already-held lock is a no-op that must not raise.
+        with self.store.lock:
+            with self.store.lock:
+                self.assertGreater(self.store.lock._depth, 0)
+
+    def test_state_lock_serializes_concurrent_processes(self):
+        """Multiple OS processes writing the same workspace must not lose updates."""
+        import subprocess
+        import sys
+        import textwrap
+
+        self.store.init()
+        script = textwrap.dedent(
+            """
+            import sys
+            from geiter.core import GeiterStore
+            store = GeiterStore(sys.argv[1])
+            for index in range(10):
+                store.add("memories", "fact", {"text": f"proc-{sys.argv[2]}-{index}"})
+            """
+        )
+        project_root = str(Path(__file__).parent.parent)
+        procs = [
+            subprocess.Popen(
+                [sys.executable, "-c", script, self.tempdir.name, str(worker)],
+                cwd=project_root,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            for worker in range(4)
+        ]
+        for proc in procs:
+            _, err = proc.communicate(timeout=60)
+            self.assertEqual(proc.returncode, 0, err.decode("utf-8", "replace"))
+        # 4 processes x 10 adds each, with no lost updates.
+        self.assertEqual(len(self.store.read()["memories"]), 40)
 
     def test_iteration_leaves_a_complete_trace(self):
         self.store.init()

@@ -172,6 +172,17 @@ answer(prompt: str) -> ProviderAnswer
 Use `target_citation_rate` for source attribution. `citation_rate` alone only
 means the provider returned some citation.
 
+## Concurrency
+
+Multiple agents or processes may share one workspace. Every state-mutating
+operation runs while holding a reentrant advisory lock on a sidecar
+`.geiter/state.lock` file, so a full read-modify-write cycle is atomic with
+respect to other processes and no update is lost. The lock is reentrant, so
+nested calls such as `iterate` -> `inspect` -> `add` are safe. If the lock
+cannot be acquired within the timeout, the operation fails loudly with a
+`TimeoutError` instead of corrupting the state file. Credentials and provider
+configuration are never written into the locked state.
+
 ## Self-assessment
 
 `score` returns a `geiter/score-v1` object. `north_star` is a single 0-100

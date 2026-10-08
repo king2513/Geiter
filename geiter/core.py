@@ -4,6 +4,8 @@ import json
 import hashlib
 import time
 import uuid
+import functools
+import threading
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -14,6 +16,116 @@ from . import __version__
 
 
 DEFAULT_ACTION_LEASE_SECONDS = 3600
+
+try:  # pragma: no cover - platform import guard
+    import fcntl  # type: ignore
+except ImportError:  # pragma: no cover - Windows fallback
+    fcntl = None  # type: ignore
+
+try:  # pragma: no cover - platform import guard
+    import msvcrt  # type: ignore
+except ImportError:  # pragma: no cover - POSIX fallback
+    msvcrt = None  # type: ignore
+
+
+class FileLock:
+    """A reentrant, cross-process advisory lock backed by a sidecar lock file.
+
+    The lock protects the read-modify-write cycle around ``state.json`` so two
+    agents (or two processes) cannot interleave and lose an update. It uses
+    ``msvcrt.locking`` on Windows and ``fcntl.flock`` elsewhere, writing to a
+    dedicated ``.geiter/state.lock`` file so the state file itself is never
+    held open across the critical section.
+
+    Reentrancy is tracked with thread-local state, not instance-wide state, so
+    two threads sharing one store still contend for the real file lock while a
+    single thread can safely nest calls such as ``iterate`` -> ``inspect`` ->
+    ``add``.
+    """
+
+    def __init__(self, path: Path, timeout: float = 10.0, poll_interval: float = 0.01):
+        self.path = path
+        self.timeout = timeout
+        self.poll_interval = poll_interval
+        self._local = threading.local()
+
+    @property
+    def _depth(self) -> int:
+        return getattr(self._local, "depth", 0)
+
+    @_depth.setter
+    def _depth(self, value: int) -> None:
+        self._local.depth = value
+
+    @property
+    def _handle(self) -> Any:
+        return getattr(self._local, "handle", None)
+
+    @_handle.setter
+    def _handle(self, value: Any) -> None:
+        self._local.handle = value
+
+    def _acquire_file(self, handle: Any) -> None:
+        if fcntl is not None:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        elif msvcrt is not None:  # pragma: no cover - Windows path
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+
+    def _release_file(self, handle: Any) -> None:
+        if fcntl is not None:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        elif msvcrt is not None:  # pragma: no cover - Windows path
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+
+    def __enter__(self) -> FileLock:
+        if self._depth > 0:
+            self._depth += 1
+            return self
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        deadline = time.monotonic() + self.timeout
+        handle = open(self.path, "a+b")
+        while True:
+            try:
+                self._acquire_file(handle)
+                break
+            except OSError:
+                if time.monotonic() >= deadline:
+                    handle.close()
+                    raise TimeoutError(f"could not acquire geiter state lock: {self.path}")
+                time.sleep(self.poll_interval)
+        self._handle = handle  # type: ignore[misc]
+        self._depth = 1
+        return self
+
+    def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
+        if self._depth == 0:
+            return
+        self._depth -= 1
+        if self._depth == 0:
+            handle = self._handle
+            if handle is not None:
+                try:
+                    self._release_file(handle)
+                finally:
+                    handle.close()
+                    self._handle = None
+
+
+def synchronized(method: Any) -> Any:
+    """Serialize a mutating store method across processes.
+
+    The wrapped method runs while holding the store's state lock, so a full
+    read-modify-write cycle is atomic with respect to other processes.
+    """
+
+    @functools.wraps(method)
+    def wrapper(self: GeiterStore, *args: Any, **kwargs: Any) -> Any:
+        with self.lock:
+            return method(self, *args, **kwargs)
+
+    return wrapper
 
 
 def now() -> str:
@@ -38,15 +150,18 @@ class Record:
 class GeiterStore:
     """Durable JSON store with an append-only event log."""
 
-    def __init__(self, root: str | Path = "."):
+    def __init__(self, root: str | Path = ".", lock_timeout: float = 10.0):
         self.root = Path(root).resolve()
         self.geiter_dir = self.root / ".geiter"
         self.state_path = self.geiter_dir / "state.json"
         self.events_path = self.geiter_dir / "events.jsonl"
+        self.lock_path = self.geiter_dir / "state.lock"
+        self.lock = FileLock(self.lock_path, timeout=lock_timeout)
 
     def exists(self) -> bool:
         return self.state_path.exists()
 
+    @synchronized
     def init(self) -> dict[str, Any]:
         self.geiter_dir.mkdir(parents=True, exist_ok=True)
         if not self.exists():
@@ -94,6 +209,7 @@ class GeiterStore:
             handle.write(json.dumps(event, ensure_ascii=False) + "\n")
         return event
 
+    @synchronized
     def add(self, collection: str, kind: str, data: dict[str, Any]) -> dict[str, Any]:
         state = self.read()
         record = Record(uid(kind[:3]), now(), kind, data).to_dict()
@@ -108,6 +224,7 @@ class GeiterStore:
     def prompts(self) -> list[dict[str, Any]]:
         return self.list_records("prompts")
 
+    @synchronized
     def inspect(self) -> dict[str, Any]:
         state = self.read()
         files = [
@@ -131,6 +248,7 @@ class GeiterStore:
             },
         )
 
+    @synchronized
     def iterate(self, hypothesis: str | None = None) -> dict[str, Any]:
         recovered_actions = self.recover_stale_actions()
         state = self.read()
@@ -352,6 +470,7 @@ class GeiterStore:
         self.event("runs.started", run)
         return run
 
+    @synchronized
     def record_run_attempt(
         self,
         run_id: str,
@@ -383,6 +502,7 @@ class GeiterStore:
         self.event("runs.attempted", {"run_id": run_id, **attempt})
         return attempt
 
+    @synchronized
     def finish_run(self, run_id: str) -> dict[str, Any]:
         state = self.read()
         run = next((item for item in state.get("runs", []) if item["id"] == run_id), None)
@@ -543,7 +663,14 @@ class GeiterStore:
                 "replay-before-reach",
                 "agent-first",
                 "external-effects-require-policy",
+                "concurrent-writes-are-serialized",
             ],
+            "concurrency": {
+                "state_lock": ".geiter/state.lock",
+                "mechanism": "reentrant advisory lock (fcntl.flock / msvcrt.locking)",
+                "guarantee": "state read-modify-write cycles are atomic across processes",
+                "on_contention": "raise TimeoutError instead of corrupting state",
+            },
         }
 
     def status(self) -> dict[str, Any]:
@@ -610,6 +737,7 @@ class GeiterStore:
             "latest_learning": latest_learning,
         }
 
+    @synchronized
     def propose_action(
         self,
         action_type: str,
@@ -691,6 +819,7 @@ class GeiterStore:
             seconds=data.get("claim_lease_seconds", DEFAULT_ACTION_LEASE_SECONDS)
         )
 
+    @synchronized
     def claim_action(
         self,
         action_id: str,
@@ -728,6 +857,7 @@ class GeiterStore:
     def stale_actions(self, at: str | None = None) -> list[dict[str, Any]]:
         return self.list_actions("in_progress", stale_only=True, at=at)
 
+    @synchronized
     def reclaim_action(
         self,
         action_id: str,
@@ -779,6 +909,7 @@ class GeiterStore:
             return None
         return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
 
+    @synchronized
     def resolve_action(
         self,
         action_id: str,
@@ -1033,6 +1164,7 @@ class GeiterStore:
         run["data"]["gate"] = persisted_gate
         return gate
 
+    @synchronized
     def add_prompt(self, text: str, intent: str | None = None) -> dict[str, Any]:
         normalized = " ".join(text.split())
         if not normalized:
@@ -1053,6 +1185,7 @@ class GeiterStore:
         self.event("prompts.added", record)
         return record
 
+    @synchronized
     def record_observation(
         self,
         prompt_id: str,
@@ -1550,6 +1683,7 @@ class GeiterStore:
             "next_action": GeiterStore._recommendation(metrics, count),
         }
 
+    @synchronized
     def propose_experiment(self, hypothesis: str, change: str, risk: str = "low") -> dict[str, Any]:
         if not hypothesis.strip() or not change.strip():
             raise ValueError("experiment hypothesis and change are required")
@@ -1568,6 +1702,7 @@ class GeiterStore:
         self.event("experiments.proposed", experiment)
         return experiment
 
+    @synchronized
     def approve_experiment(self, experiment_id: str) -> dict[str, Any]:
         state = self.read()
         experiment = next((item for item in state.get("experiments", []) if item["id"] == experiment_id), None)
@@ -1581,6 +1716,7 @@ class GeiterStore:
         self.event("experiments.approved", experiment)
         return experiment
 
+    @synchronized
     def record_experiment_result(
         self,
         experiment_id: str,
