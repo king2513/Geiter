@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.26.1 - 2026-10-08
+
+- split the store into focused modules (`persistence`, `observations`, `runs`, `actions`, `analysis`, `baselines`, `experiments`, `gate`, `iteration`, `surfaces`) composed as mixins, reducing `core.py` from 1957 to 176 lines
+- kept `geiter.core.GeiterStore` as the single public entry point with an unchanged 55-method public API
+- reorganized imports so the dependency direction stays explicit and the store remains the only composition root
+
 ## 1.26.0 - 2026-10-08
 
 - added an effectiveness aggregator that turns past `execution.result` learnings into a durable playbook of which change kinds actually work
