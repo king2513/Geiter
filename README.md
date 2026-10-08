@@ -36,6 +36,7 @@ Geiter is an agent-native runtime for Generative Engine Optimization (GEO). It g
 - autonomous execute cycles that apply a change, verify it with the regression gate, and revert it when the evidence rejects it
 - a surface policy gate where anything but the sandbox defaults to requiring human approval
 - a durable approval workflow so governed changes wait for a named approver before touching a real surface
+- a compounding playbook that learns which change strategies actually improve the score
 - evidence-aware `iterate` cycles that consume comparisons and pending experiments
 - persistent prioritized agent action queue with evidence-backed completion
 - agent-proposed actions with deduplication and explicit priorities
@@ -75,6 +76,7 @@ python -m geiter govern propose --surface-id my-docs --heading "Overview" --body
 python -m geiter govern approve <request-id> --approver alice --json
 python -m geiter govern reject <request-id> --approver alice --json
 python -m geiter govern list --json
+python -m geiter experience --json
 python -m geiter action propose --type investigate --prompt "Check the weakest citation cell" --priority high --json
 python -m geiter action list --json
 python -m geiter action list --status stale --json
@@ -149,7 +151,7 @@ printf '%s\n' \
   | python -m geiter gateway
 ```
 
-Tools include `geiter_status`, `geiter_context`, `geiter_add_prompt`, `geiter_record_observation`, `geiter_analyze`, `geiter_score`, `geiter_introspect`, `geiter_execute`, `geiter_govern`, `geiter_approvals`, `geiter_health`, `geiter_runs`, `geiter_report`, `geiter_resume`, `geiter_regression`, `geiter_matrix`, `geiter_save_baseline`, `geiter_compare`, `geiter_propose_experiment`, `geiter_record_experiment_result`, `geiter_iterate`, `geiter_actions`, `geiter_propose_action`, `geiter_complete_action`, `geiter_skip_action`, `geiter_reclaim_action`, `geiter_connect`, and `geiter_capabilities`. Resources include `geiter://status`, `geiter://context`, `geiter://report`, `geiter://score`, `geiter://introspect`, and `geiter://capabilities`.
+Tools include `geiter_status`, `geiter_context`, `geiter_add_prompt`, `geiter_record_observation`, `geiter_analyze`, `geiter_score`, `geiter_introspect`, `geiter_experience`, `geiter_execute`, `geiter_govern`, `geiter_approvals`, `geiter_health`, `geiter_runs`, `geiter_report`, `geiter_resume`, `geiter_regression`, `geiter_matrix`, `geiter_save_baseline`, `geiter_compare`, `geiter_propose_experiment`, `geiter_record_experiment_result`, `geiter_iterate`, `geiter_actions`, `geiter_propose_action`, `geiter_complete_action`, `geiter_skip_action`, `geiter_reclaim_action`, `geiter_connect`, and `geiter_capabilities`. Resources include `geiter://status`, `geiter://context`, `geiter://report`, `geiter://score`, `geiter://introspect`, `geiter://experience`, and `geiter://capabilities`.
 
 An agent can call `geiter_context` or read `geiter://context` once at startup
 to receive capabilities, workspace status, quality checks, queued work, and a
@@ -295,6 +297,22 @@ python -m geiter govern list
 Approval authorizes the **attempt**, never the **outcome**: an approved change
 still has to survive the regression gate, so no surface can be mutated by a
 change that the evidence rejects.
+
+## Compounding (the self-improvement flywheel)
+
+Every executed change already leaves an `execution.result` learning. The
+`experience` surface turns that log into a durable playbook: for each change
+kind it reports attempts, accept rate, and the average north-star delta. The
+execute cycle then prefers a kind that historically improved the score:
+
+```bash
+python -m geiter experience --json
+```
+
+A strategy only earns preference after a minimum number of samples, so a single
+lucky change cannot lock the loop into one approach, and a cold start falls back
+to the default deterministically. This is the compounding part of self-iteration:
+the more Geiter iterates, the better it gets at choosing what to try next.
 
 ## Design principles
 

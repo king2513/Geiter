@@ -10,6 +10,7 @@ from .execute import (
     decide_approval,
     execute_cycle,
     execute_governed,
+    experience,
     list_approvals,
     surface_provider_factory,
 )
@@ -150,6 +151,11 @@ def parser() -> argparse.ArgumentParser:
     govern.add_argument("--request-id", dest="exec_request_id")
     govern.add_argument("--target")
     govern.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
+
+    commands.add_parser(
+        "experience",
+        help="Show the compounding playbook of historical change effectiveness",
+    ).add_argument("--json", action="store_true", help=argparse.SUPPRESS)
 
     goal = commands.add_parser("goal", help="Manage goals")
     goal.add_argument("action", choices=("add", "list"))
@@ -364,6 +370,8 @@ def main(argv: list[str] | None = None) -> None:
                 target=target,
                 request_id=args.exec_request_id,
             )
+    elif args.command == "experience":
+        result = experience(store)
     elif args.command == "goal":
         if args.action == "add":
             if not args.text:

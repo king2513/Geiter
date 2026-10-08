@@ -37,6 +37,7 @@ govern propose --surface-id <id> --heading <heading> --body <body> [--level <aut
 govern approve <request-id> [--approver <who>] --json
 govern reject <request-id> [--approver <who>] --json
 govern list --json
+experience --json
 action list [--status <open|in_progress|completed|skipped|stale|all>] --json
 action propose --type <type> --prompt <text> [--priority <normal|high|critical>] [--source <source>] [--dedupe-key <key>] --json
 action complete <action-id> --evidence <text> --json
@@ -257,3 +258,25 @@ it. The contract is declared in capabilities metadata under
 
 A workspace created by an older version is backfilled on read so a newly added
 collection never makes `doctor` fail for an existing state file.
+
+## Compounding experience
+
+Every executed change writes an `execution.result` learning containing the
+change kind, whether it was accepted, and the north-star score before and after.
+`experience` (`geiter/experience-v1`) aggregates that log into a durable
+playbook. For each change kind it reports `attempts`, `accepted`, `reverted`,
+`accept_rate`, `mean_score_delta`, `improved_count`, `regressed_count`, and
+whether the kind is `preference_eligible`. It also returns a `recommendation`
+naming the change kind the next cycle should use.
+
+When `execute` does not receive an explicit change kind, it selects one from
+this historical evidence, so a strategy that improved the score tends to be
+reused. A kind becomes eligible only after `minimum_samples_for_preference`
+attempts, which prevents a single lucky change from locking the loop into one
+strategy; before that, the loop falls back to the default kind deterministically.
+An explicit `kind` always overrides the recommendation.
+
+The surface is available as the CLI command `experience`, the gateway tool
+`geiter_experience`, and the resource `geiter://experience`. A bounded form is
+included in `report` and in the agent bootstrap context, so an agent can read
+what worked before choosing its next change.

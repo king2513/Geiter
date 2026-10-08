@@ -81,6 +81,11 @@ TOOLS = [
         },
     },
     {
+        "name": "geiter_experience",
+        "description": "Read the compounding playbook of historical change effectiveness and the recommended next strategy.",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
         "name": "geiter_govern",
         "description": "Propose a governed change for a surface policy; returns denied, pending_approval, or executed.",
         "inputSchema": {
@@ -324,6 +329,12 @@ RESOURCES = [
         "mimeType": "application/json",
     },
     {
+        "uri": "geiter://experience",
+        "name": "Geiter experience",
+        "description": "Compounding playbook: historical change effectiveness and the recommended next strategy.",
+        "mimeType": "application/json",
+    },
+    {
         "uri": "geiter://capabilities",
         "name": "Geiter capabilities",
         "description": "Stable version, transport, schema, and agent entrypoint metadata.",
@@ -381,6 +392,10 @@ def dispatch(store: GeiterStore, request: dict[str, Any]) -> dict[str, Any] | No
             value = store.score()
         elif uri == "geiter://introspect":
             value = store.introspect()
+        elif uri == "geiter://experience":
+            from .execute import experience
+
+            value = experience(store)
         elif uri == "geiter://capabilities":
             value = store.capabilities()
         else:
@@ -425,6 +440,10 @@ def dispatch(store: GeiterStore, request: dict[str, Any]) -> dict[str, Any] | No
                 baseline_id=args.get("baseline_id"),
                 target=exec_target,
             )
+        elif name == "geiter_experience":
+            from .execute import experience
+
+            value = experience(store)
         elif name == "geiter_govern":
             from .execute import (
                 SandboxSurface,

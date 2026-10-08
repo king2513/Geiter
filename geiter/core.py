@@ -653,6 +653,7 @@ class GeiterStore:
             "self_assessment": {
                 "score_schema": "geiter/score-v1",
                 "introspect_schema": "geiter/introspect-v1",
+                "experience_schema": "geiter/experience-v1",
                 "score_range": [0, 100],
                 "score_direction": "higher_is_better",
                 "score_statuses": ["scored", "insufficient_data"],
@@ -781,6 +782,7 @@ class GeiterStore:
                 "north_star": report["score"]["north_star"],
                 "weakest_dimension": report["score"]["weakest_dimension"],
                 "next_opportunity": report["introspect"]["next_action"],
+                "experience": report["experience"],
             },
             "latest_iteration": latest_iteration,
             "latest_learning": latest_learning,
@@ -1884,7 +1886,7 @@ class GeiterStore:
             "analysis": analysis,
             "score": self.score(),
             "introspect": self.introspect(),
-            "matrix": self.analyze_matrix(),
+            "experience": self._experience_bounded(),            "matrix": self.analyze_matrix(),
             "health": self.health(),
             "doctor": doctor,
             "latest_gate": latest_gate,
@@ -1923,6 +1925,22 @@ class GeiterStore:
             "failed_checks": gate.get("failed_checks", []),
             "action": gate.get("action"),
             "next_action": gate.get("next_action"),
+        }
+
+    def _experience_bounded(self) -> dict[str, Any]:
+        """Return a bounded playbook summary without mutating state."""
+        try:
+            from .execute import experience  # local import avoids a cycle
+
+            report = experience(self)
+        except Exception:  # pragma: no cover - never break report on this
+            return {"status": "unavailable", "total_executions": 0, "strategies": []}
+        return {
+            "status": "available",
+            "total_executions": report["total_executions"],
+            "strategy_count": report["strategy_count"],
+            "top_strategy": report["strategies"][0] if report["strategies"] else None,
+            "recommendation": report["recommendation"],
         }
 
     @staticmethod

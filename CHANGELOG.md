@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.26.0 - 2026-10-08
+
+- added an effectiveness aggregator that turns past `execution.result` learnings into a durable playbook of which change kinds actually work
+- made the execute cycle choose its strategy from historical effectiveness, so a change kind that improved the score is preferred on later cycles
+- required a minimum sample before a strategy earns preference, so one lucky change cannot lock the loop into a single strategy
+- added the `experience` surface (`geiter/experience-v1`) with per-kind accept rate, mean score delta, and the recommended next strategy
+- exposed `experience` through the CLI, the `geiter_experience` gateway tool, and the `geiter://experience` resource, and surfaced a bounded form in `report` and the agent bootstrap context
+
 ## 1.25.0 - 2026-10-08
 
 - added a surface policy gate with `auto`, `approve`, and `deny` levels; every surface other than the trusted sandbox defaults to requiring human approval

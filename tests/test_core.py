@@ -21,9 +21,12 @@ from geiter.execute import (
     SandboxSurface,
     SurfacePolicy,
     decide_approval,
+    effectiveness,
     execute_cycle,
     execute_governed,
+    experience,
     list_approvals,
+    recommend_kind,
     resolve_policy,
     surface_provider_factory,
 )
@@ -469,6 +472,115 @@ class GeiterStoreTests(unittest.TestCase):
         self.assertEqual(first["data"]["approver"], "alice")
         # Idempotent: the first decision stands.
         self.assertEqual(second["data"]["approver"], "alice")
+
+    def test_effectiveness_is_empty_on_cold_start(self):
+        store = GeiterStore(self.tempdir.name)
+        store.init()
+        report = effectiveness(store)
+        self.assertEqual(report["schema"], "geiter/experience-v1")
+        self.assertEqual(report["total_executions"], 0)
+        self.assertEqual(report["strategies"], [])
+
+    def test_recommend_kind_falls_back_before_enough_history(self):
+        store = GeiterStore(self.tempdir.name)
+        store.init()
+        rec = recommend_kind(store)
+        self.assertEqual(rec["kind"], "append_section")
+        self.assertEqual(rec["reason"], "no_change_kind_has_enough_history_yet")
+        # A single attempt is not enough to earn preference.
+        store.add("learnings", "execution.result", {
+            "change_id": "c1", "kind": "cite_target", "accepted": True,
+            "verdict": {"accepted": True, "score_before": 10.0, "score_after": 20.0},
+        })
+        rec = recommend_kind(store)
+        self.assertEqual(rec["kind"], "append_section")
+
+    def test_effectiveness_prefers_the_strategy_that_improved(self):
+        store = GeiterStore(self.tempdir.name)
+        store.init()
+
+        def seed(kind: str, accepted: bool, before: float, after: float) -> None:
+            store.add("learnings", "execution.result", {
+                "change_id": f"c_{kind}_{before}_{after}", "kind": kind,
+                "accepted": accepted, "evidence": {"weakest_dimension": "target_citation"},
+                "verdict": {"accepted": accepted, "score_before": before, "score_after": after},
+            })
+
+        # bad strategy: half reverted, and the accepted one actually regressed.
+        seed("bad_kind", True, 40.0, 38.0)
+        seed("bad_kind", False, 40.0, 40.0)
+        # good strategy: consistently improved.
+        seed("good_kind", True, 40.0, 55.0)
+        seed("good_kind", True, 55.0, 70.0)
+
+        report = effectiveness(store)
+        self.assertEqual(report["total_executions"], 4)
+        by_kind = {item["kind"]: item for item in report["strategies"]}
+        self.assertEqual(by_kind["good_kind"]["accept_rate"], 1.0)
+        self.assertEqual(by_kind["good_kind"]["mean_score_delta"], 15.0)
+        self.assertEqual(by_kind["good_kind"]["improved_count"], 2)
+        self.assertEqual(by_kind["good_kind"]["regressed_count"], 0)
+        self.assertEqual(by_kind["bad_kind"]["regressed_count"], 1)
+        # It prefers the strategy that actually improved the score.
+        self.assertEqual(recommend_kind(store)["kind"], "good_kind")
+        # And the strategies are ranked best-first.
+        self.assertEqual(report["strategies"][0]["kind"], "good_kind")
+
+    def test_experience_playbook_surface(self):
+        store = GeiterStore(self.tempdir.name)
+        store.init()
+        store.add("learnings", "execution.result", {
+            "change_id": "c1", "kind": "cite_target", "accepted": True,
+            "verdict": {"accepted": True, "score_before": 10.0, "score_after": 30.0},
+        })
+        store.add("learnings", "execution.result", {
+            "change_id": "c2", "kind": "cite_target", "accepted": True,
+            "verdict": {"accepted": True, "score_before": 30.0, "score_after": 50.0},
+        })
+        report = experience(store)
+        self.assertEqual(report["schema"], "geiter/experience-v1")
+        self.assertEqual(report["total_executions"], 2)
+        self.assertEqual(report["recommendation"]["kind"], "cite_target")
+        # The bounded form is exposed through report and context without mutation.
+        bounded = store.report()["experience"]
+        self.assertEqual(bounded["total_executions"], 2)
+        self.assertEqual(bounded["top_strategy"]["kind"], "cite_target")
+        self.assertEqual(store.context()["self_assessment"]["experience"]["total_executions"], 2)
+
+    def test_execute_cycle_uses_learned_strategy_by_default(self):
+        store = GeiterStore(self.tempdir.name)
+        store.init()
+        target = store.read()["identity"]["name"]
+        store.add_prompt("What is Geiter?")
+        store.add_prompt("Why use Geiter?")
+        surface = SandboxSurface(self.tempdir.name)
+        surface.ensure()
+        # Seed a winning strategy so recommendation is eligible.
+        for index, (before, after) in enumerate([(10.0, 20.0), (20.0, 30.0)]):
+            store.add("learnings", "execution.result", {
+                "change_id": f"seed-{index}", "kind": "cite_target", "accepted": True,
+                "verdict": {"accepted": True, "score_before": before, "score_after": after},
+            })
+        result = execute_cycle(
+            store,
+            "Learned",
+            f"{target} is documented and cited.",
+            provider_factory=surface_provider_factory(surface, target),
+            target=target,
+        )
+        # It should have chosen the historically better kind, not the default.
+        self.assertEqual(result["strategy"]["kind"], "cite_target")
+        self.assertEqual(result["proposal"]["kind"], "cite_target")
+        # An explicit kind overrides the recommendation.
+        explicit = execute_cycle(
+            store,
+            "Explicit",
+            f"{target} is documented and cited.",
+            provider_factory=surface_provider_factory(surface, target),
+            target=target,
+            kind="append_section",
+        )
+        self.assertEqual(explicit["proposal"]["kind"], "append_section")
 
     def test_sandbox_surface_apply_and_revert(self):
         surface = SandboxSurface(self.tempdir.name)
@@ -1241,6 +1353,7 @@ class GeiterStoreTests(unittest.TestCase):
                 "geiter://capabilities",
                 "geiter://score",
                 "geiter://introspect",
+                "geiter://experience",
             },
         )
         read = dispatch(self.store, {

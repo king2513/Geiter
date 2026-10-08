@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import time
+from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -32,6 +33,110 @@ from .core import GeiterStore
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+# A change kind is the "strategy" Geiter uses to improve the surface. P3 makes
+# these learnable: effectiveness aggregates history per kind so later cycles
+# prefer strategies that have actually worked.
+DEFAULT_CHANGE_KIND = "append_section"
+MIN_SAMPLES_FOR_PREFERENCE = 2
+
+
+def effectiveness(store: GeiterStore) -> dict[str, Any]:
+    """Aggregate the historical success of each change kind ("strategy").
+
+    P1 already writes an ``execution.result`` learning for every applied change
+    with the change kind, whether it was accepted, and the score before and
+    after. This turns that log into a durable playbook: for each kind it
+    reports attempts, accept rate, and the average north-star delta, so later
+    cycles can prefer strategies that historically worked instead of always
+    guessing. A kind with too few samples is reported but not yet preferred.
+    """
+    buckets: dict[str, dict[str, Any]] = defaultdict(
+        lambda: {
+            "kind": "",
+            "attempts": 0,
+            "accepted": 0,
+            "reverted": 0,
+            "score_deltas": [],
+            "weakest_dimensions": [],
+        }
+    )
+    for item in store.read().get("learnings", []):
+        if item.get("kind") != "execution.result":
+            continue
+        data = item.get("data", {})
+        verdict = data.get("verdict", {})
+        kind = data.get("kind") or verdict.get("kind") or DEFAULT_CHANGE_KIND
+        bucket = buckets[kind]
+        bucket["kind"] = kind
+        bucket["attempts"] += 1
+        if data.get("accepted"):
+            bucket["accepted"] += 1
+        else:
+            bucket["reverted"] += 1
+        before = verdict.get("score_before")
+        after = verdict.get("score_after")
+        if isinstance(before, (int, float)) and isinstance(after, (int, float)):
+            bucket["score_deltas"].append(round(after - before, 4))
+        weakest = (data.get("evidence") or {}).get("weakest_dimension")
+        if weakest:
+            bucket["weakest_dimensions"].append(weakest)
+
+    strategies = []
+    for bucket in buckets.values():
+        deltas = bucket.pop("score_deltas")
+        attempts = bucket["attempts"]
+        accept_rate = round(bucket["accepted"] / attempts, 4) if attempts else 0.0
+        mean_delta = round(sum(deltas) / len(deltas), 4) if deltas else None
+        strategies.append(
+            {
+                **bucket,
+                "accept_rate": accept_rate,
+                "mean_score_delta": mean_delta,
+                "improved_count": sum(1 for value in deltas if value > 0),
+                "regressed_count": sum(1 for value in deltas if value < 0),
+                "preference_eligible": attempts >= MIN_SAMPLES_FOR_PREFERENCE,
+            }
+        )
+    strategies.sort(
+        key=lambda item: (item["accept_rate"], item["mean_score_delta"] or 0.0),
+        reverse=True,
+    )
+    return {
+        "schema": "geiter/experience-v1",
+        "generated_at": now_iso(),
+        "total_executions": sum(item["attempts"] for item in strategies),
+        "strategy_count": len(strategies),
+        "minimum_samples_for_preference": MIN_SAMPLES_FOR_PREFERENCE,
+        "strategies": strategies,
+    }
+
+
+def recommend_kind(store: GeiterStore) -> dict[str, Any]:
+    """Choose the change kind for the next cycle from historical effectiveness.
+
+    Preference requires a minimum sample so a single lucky change does not lock
+    the system into one strategy. When no kind is eligible yet, this falls back
+    to the default and says so, keeping the loop deterministic on a cold start.
+    """
+    report = effectiveness(store)
+    eligible = [item for item in report["strategies"] if item["preference_eligible"]]
+    if not eligible:
+        return {
+            "kind": DEFAULT_CHANGE_KIND,
+            "reason": "no_change_kind_has_enough_history_yet",
+            "experience": report,
+        }
+    best = eligible[0]
+    return {
+        "kind": best["kind"],
+        "reason": (
+            f"highest historical accept rate ({best['accept_rate']}) across "
+            f"{best['attempts']} attempts"
+        ),
+        "experience": report,
+    }
 
 
 SANDBOX_DIRNAME = "sandbox"
@@ -307,6 +412,7 @@ def execute_cycle(
     provider_factory: Any,
     baseline_id: str | None = None,
     target: str | None = None,
+    kind: str | None = None,
 ) -> dict[str, Any]:
     """Run one autonomous proposal -> apply -> verify -> accept/revert cycle.
 
@@ -314,12 +420,17 @@ def execute_cycle(
     bound to the *current* surface content. This is what makes the loop honest:
     after the change is applied, the provider re-reads the mutated surface, so
     the gate judges the change's real effect rather than a canned response.
+
+    When ``kind`` is omitted the strategy is chosen from historical
+    effectiveness, which is how P3 compounding works: each cycle tends to use a
+    change kind that has historically been accepted.
     """
     surface = SandboxSurface(store.root)
     surface_info = surface.ensure()
     before_score = store.score()
+    selection = recommend_kind(store) if kind is None else {"kind": kind, "reason": "explicit"}
 
-    proposal = propose_change(store, surface, heading, body)
+    proposal = propose_change(store, surface, heading, body, kind=selection["kind"])
     snapshot_path = surface.snapshot(proposal.change_id)
     applied_path = surface.append_section(heading, body)
     store.event(
@@ -361,6 +472,7 @@ def execute_cycle(
         "execution.result",
         {
             "change_id": proposal.change_id,
+            "kind": proposal.kind,
             "accepted": accepted,
             "rationale": proposal.rationale,
             "evidence": proposal.evidence,
@@ -371,6 +483,7 @@ def execute_cycle(
     return {
         "schema": "geiter/execution-v1",
         "surface": surface_info,
+        "strategy": selection,
         "proposal": proposal.to_dict(),
         "applied_path": str(applied_path),
         "run": run["run"],
@@ -454,6 +567,30 @@ def list_approvals(store: GeiterStore, status: str | None = APPROVAL_PENDING) ->
     if status is not None:
         requests = [item for item in requests if item["data"].get("status") == status]
     return requests
+
+
+def experience(store: GeiterStore) -> dict[str, Any]:
+    """Return the durable playbook: historical effectiveness plus the next strategy.
+
+    This is the compounding surface. It answers two questions an agent should
+    not have to guess at: which strategies have worked before, and what should
+    the next change try.
+    """
+    report = effectiveness(store)
+    selection = recommend_kind(store)
+    return {
+        "schema": "geiter/experience-v1",
+        "generated_at": now_iso(),
+        "total_executions": report["total_executions"],
+        "strategy_count": report["strategy_count"],
+        "minimum_samples_for_preference": report["minimum_samples_for_preference"],
+        "strategies": report["strategies"],
+        "recommendation": {"kind": selection["kind"], "reason": selection["reason"]},
+        "compounding": (
+            "each verified change updates the playbook, and the next cycle prefers "
+            "a strategy that historically improved the score"
+        ),
+    }
 
 
 def execute_governed(
