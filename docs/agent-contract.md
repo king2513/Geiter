@@ -33,6 +33,10 @@ experiment approve --id <experiment-id> --json
 experiment result --id <experiment-id> --outcome <supported|rejected|inconclusive> --evidence <text> --json
 iterate [--hypothesis <text>] --json
 execute --heading <heading> --body <body> [--baseline-id <id>] [--target <token>] --json
+govern propose --surface-id <id> --heading <heading> --body <body> [--level <auto|approve|deny>] [--target <token>] --json
+govern approve <request-id> [--approver <who>] --json
+govern reject <request-id> [--approver <who>] --json
+govern list --json
 action list [--status <open|in_progress|completed|skipped|stale|all>] --json
 action propose --type <type> --prompt <text> [--priority <normal|high|critical>] [--source <source>] [--dedupe-key <key>] --json
 action complete <action-id> --evidence <text> --json
@@ -229,3 +233,27 @@ real effect of a change rather than a canned response. Nothing in this loop
 touches external or real content. The surface is available as the CLI command
 `execute` and the gateway tool `geiter_execute`, and the contract is declared in
 capabilities metadata under `autonomous_execution`.
+
+## Change governance
+
+Autonomous execution is bounded by an explicit surface policy. Every surface
+other than the trusted `sandbox` must declare a policy, and an undeclared
+surface defaults to `approve`, so a mistake can never silently mutate real
+content. Policy levels are `auto` (apply immediately), `approve` (wait for a
+human), and `deny` (refuse). `allowed_kinds` restricts which change kinds a
+surface accepts; a change kind outside the set is treated as `deny`.
+
+A governed change is persisted as a `change.approval_request` with status
+`pending_approval`, so it survives across processes. `geiter_approvals` (or
+`govern approve` / `govern reject`) decides a request and records the named
+approver. A decided request is idempotent: the first decision stands and cannot
+be overwritten. A rejected request never executes.
+
+Approval authorizes only the **attempt**, never the **outcome**. Once approved,
+the change is applied and then arbitrated by the regression gate exactly like an
+auto change, so an approved change is still reverted when the evidence rejects
+it. The contract is declared in capabilities metadata under
+`change_governance` with the `geiter/approvals-v1` schema.
+
+A workspace created by an older version is backfilled on read so a newly added
+collection never makes `doctor` fail for an existing state file.

@@ -17,7 +17,16 @@ from geiter.providers import (
     resume_provider,
     run_provider,
 )
-from geiter.execute import SandboxSurface, execute_cycle, surface_provider_factory
+from geiter.execute import (
+    SandboxSurface,
+    SurfacePolicy,
+    decide_approval,
+    execute_cycle,
+    execute_governed,
+    list_approvals,
+    resolve_policy,
+    surface_provider_factory,
+)
 
 
 class GeiterStoreTests(unittest.TestCase):
@@ -336,6 +345,130 @@ class GeiterStoreTests(unittest.TestCase):
         self.assertEqual(matrix["cell_count"], 2)
         self.assertEqual(matrix["weakest_cells"][0]["provider"], "provider-b")
         self.assertEqual(matrix["weakest_cells"][0]["intent"], "evaluation")
+
+    def test_read_backfills_collections_for_older_workspaces(self):
+        """A workspace written before a collection existed must stay consistent."""
+        self.store.init()
+        # Simulate a legacy state file that predates the approvals collection.
+        state = self.store.read()
+        state.pop("approvals", None)
+        self.store._write(state)
+        reloaded = self.store.read()
+        self.assertIn("approvals", reloaded)
+        self.assertEqual(reloaded["approvals"], [])
+        self.assertTrue(self.store.doctor()["ok"])
+
+    def test_unknown_surface_policy_defaults_to_approve(self):
+        policy = resolve_policy("some-real-site")
+        self.assertEqual(policy.level, "approve")
+        self.assertEqual(policy.decide("append_section"), "approve")
+        # The sandbox is the only surface trusted to auto-apply.
+        self.assertEqual(resolve_policy("sandbox").level, "auto")
+        self.assertEqual(resolve_policy("sandbox").decide("append_section"), "auto")
+
+    def test_policy_levels_decide_changes(self):
+        self.assertEqual(
+            resolve_policy("x", {"level": "deny"}).decide("append_section"), "deny"
+        )
+        self.assertEqual(
+            resolve_policy("x", {"level": "auto"}).decide("append_section"), "auto"
+        )
+        # allowed_kinds restricts what an auto surface will touch.
+        policy = resolve_policy("x", {"level": "auto", "allowed_kinds": ["rewrite"]})
+        self.assertEqual(policy.decide("append_section"), "deny")
+        self.assertEqual(policy.decide("rewrite"), "auto")
+        with self.assertRaises(ValueError):
+            resolve_policy("x", {"level": "nonsense"})
+
+    def test_execute_governed_requires_approval_for_unknown_surface(self):
+        store = GeiterStore(self.tempdir.name)
+        store.init()
+        target = store.read()["identity"]["name"]
+        surface = SandboxSurface(self.tempdir.name)
+        surface.ensure()
+        before = surface.read()
+        result = execute_governed(
+            store,
+            "real-site",
+            "Real heading",
+            "Real body",
+            provider_factory=surface_provider_factory(surface, target),
+            target=target,
+        )
+        self.assertEqual(result["status"], "pending_approval")
+        # Nothing may be applied before approval.
+        self.assertEqual(surface.read(), before)
+        pending = list_approvals(store, "pending_approval")
+        self.assertEqual(len(pending), 1)
+        self.assertEqual(pending[0]["data"]["heading"], "Real heading")
+
+    def test_execute_governed_denies_when_policy_denies(self):
+        store = GeiterStore(self.tempdir.name)
+        store.init()
+        target = store.read()["identity"]["name"]
+        surface = SandboxSurface(self.tempdir.name)
+        surface.ensure()
+        result = execute_governed(
+            store,
+            "locked-site",
+            "H",
+            "B",
+            provider_factory=surface_provider_factory(surface, target),
+            declared_policy={"level": "deny"},
+            target=target,
+        )
+        self.assertEqual(result["status"], "denied")
+        self.assertNotIn("verdict", result)
+
+    def test_approved_request_executes_and_rejected_one_does_not(self):
+        store = GeiterStore(self.tempdir.name)
+        store.init()
+        target = store.read()["identity"]["name"]
+        store.add_prompt("What is Geiter?")
+        store.add_prompt("Why use Geiter?")
+        surface = SandboxSurface(self.tempdir.name)
+        surface.ensure()
+        factory = surface_provider_factory(surface, target)
+        # Propose -> pending.
+        proposal = execute_governed(
+            store, "site", "Geiter: approved", "Geiter is cited here.",
+            provider_factory=factory, target=target,
+        )
+        request_id = proposal["approval_request_id"]
+        # A rejected request must not execute.
+        execute_governed(
+            store, "site", "ignored", "ignored",
+            provider_factory=factory, request_id=request_id,
+        )
+        # Approve and execute using the stored request content.
+        decided = decide_approval(store, request_id, "approved", "human:alice")
+        self.assertEqual(decided["data"]["status"], "approved")
+        self.assertEqual(decided["data"]["approver"], "human:alice")
+        result = execute_governed(
+            store, "site", "ignored", "ignored",
+            provider_factory=factory, request_id=request_id, target=target,
+        )
+        self.assertEqual(result["status"], "executed")
+        self.assertEqual(result["proposal"]["edits"][0]["heading"], "Geiter: approved")
+
+    def test_decide_approval_validates_and_is_idempotent(self):
+        store = GeiterStore(self.tempdir.name)
+        store.init()
+        request = store.add(
+            "approvals", "change.approval_request",
+            {"status": "pending_approval", "surface_id": "s", "heading": "h", "body": "b"},
+        )
+        with self.assertRaises(ValueError):
+            decide_approval(store, request["id"], "approved", "")
+        with self.assertRaises(ValueError):
+            decide_approval(store, request["id"], "maybe", "alice")
+        with self.assertRaises(ValueError):
+            decide_approval(store, "nope", "approved", "alice")
+        first = decide_approval(store, request["id"], "approved", "alice")
+        second = decide_approval(store, request["id"], "approved", "bob")
+        self.assertEqual(first["data"]["approver"], "alice")
+        # Idempotent: the first decision stands.
+        self.assertEqual(second["data"]["approver"], "alice")
 
     def test_sandbox_surface_apply_and_revert(self):
         surface = SandboxSurface(self.tempdir.name)
@@ -1161,6 +1294,43 @@ class GeiterStoreTests(unittest.TestCase):
         self.assertEqual(payload["schema"], "geiter/execution-v1")
         self.assertIn("verdict", payload)
         self.assertIn("change_id", payload["verdict"])
+
+    def test_gateway_govern_and_approvals(self):
+        self.store.init()
+        listed = dispatch(self.store, {"jsonrpc": "2.0", "id": 60, "method": "tools/list"})
+        names = {tool["name"] for tool in listed["result"]["content"][0]["json"]["tools"]}
+        self.assertIn("geiter_govern", names)
+        self.assertIn("geiter_approvals", names)
+        # An undeclared surface must not auto-execute.
+        proposed = dispatch(self.store, {
+            "jsonrpc": "2.0", "id": 61, "method": "tools/call",
+            "params": {
+                "name": "geiter_govern",
+                "arguments": {
+                    "surface_id": "real-site",
+                    "heading": "Gateway heading",
+                    "body": "Gateway body",
+                },
+            },
+        })
+        payload = proposed["result"]["content"][0]["json"]
+        self.assertEqual(payload["status"], "pending_approval")
+        request_id = payload["approval_request_id"]
+        # Approve it through the gateway.
+        approved = dispatch(self.store, {
+            "jsonrpc": "2.0", "id": 62, "method": "tools/call",
+            "params": {
+                "name": "geiter_approvals",
+                "arguments": {
+                    "operation": "approve",
+                    "request_id": request_id,
+                    "approver": "human:tester",
+                },
+            },
+        })
+        self.assertEqual(
+            approved["result"]["content"][0]["json"]["data"]["status"], "approved"
+        )
 
     def test_gateway_exposes_experiment_tools(self):
         self.store.init()

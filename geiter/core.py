@@ -186,6 +186,7 @@ class GeiterStore:
                 "baselines": [],
                 "experiments": [],
                 "runs": [],
+                "approvals": [],
             }
             self._write(state)
             self.event("workspace.initialized", {"schema": state["schema"]})
@@ -194,7 +195,25 @@ class GeiterStore:
     def read(self) -> dict[str, Any]:
         if not self.exists():
             return self.init()
-        return json.loads(self.state_path.read_text(encoding="utf-8"))
+        state = json.loads(self.state_path.read_text(encoding="utf-8"))
+        if self._backfill_collections(state):
+            self._write(state)
+        return state
+
+    @staticmethod
+    def _backfill_collections(state: dict[str, Any]) -> bool:
+        """Add collections introduced by newer versions to an existing state.
+
+        Older workspaces predate collections such as ``approvals``. Backfilling
+        them on read keeps ``doctor`` meaningful and stops a version upgrade
+        from making every gate fail with a false consistency error.
+        """
+        added = False
+        for key in ("approvals",):
+            if key not in state:
+                state[key] = []
+                added = True
+        return added
 
     def _write(self, state: dict[str, Any]) -> None:
         state["updated_at"] = now()
@@ -655,6 +674,24 @@ class GeiterStore:
                     "a change is kept only when the evidence gate accepts it"
                 ),
                 "entrypoint": "python -m geiter execute --heading <heading> --body <body> --json",
+            },
+            "change_governance": {
+                "schema": "geiter/approvals-v1",
+                "policy_levels": ["auto", "approve", "deny"],
+                "default_for_unknown_surfaces": "approve",
+                "trusted_surface": "sandbox",
+                "approval_states": ["pending_approval", "approved", "rejected"],
+                "guarantee": (
+                    "a surface other than the sandbox is never mutated without an explicit "
+                    "policy decision; approval authorizes the attempt, never the outcome, "
+                    "because the regression gate still arbitrates"
+                ),
+                "entrypoints": {
+                    "propose": "python -m geiter govern propose --surface-id <id> --heading <h> --body <b> --json",
+                    "approve": "python -m geiter govern approve <request-id> --approver <who> --json",
+                    "reject": "python -m geiter govern reject <request-id> --approver <who> --json",
+                    "list": "python -m geiter govern list --json",
+                },
             },
             "action_queue": {
                 "record_kind": "agent.action",
@@ -1807,6 +1844,7 @@ class GeiterStore:
         required = {
             "identity", "goals", "memories", "prompts", "observations",
             "hypotheses", "actions", "measurements", "learnings", "iterations",
+            "approvals",
         }
         missing = sorted(required.difference(state))
         check("collections", not missing, f"missing={missing}" if missing else "all required collections present")

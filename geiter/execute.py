@@ -23,14 +23,107 @@ from __future__ import annotations
 import json
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from .core import GeiterStore
 
 
+def now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
 SANDBOX_DIRNAME = "sandbox"
 CHANGELOG_FILENAME = "knowledge.md"
+
+# Authorization levels for a governed surface. The sandbox is implicitly
+# trusted because it is Geiter's own scratch space; any real surface must
+# declare its policy and defaults to requiring human approval.
+POLICY_AUTO = "auto"
+POLICY_APPROVE = "approve"
+POLICY_DENY = "deny"
+VALID_POLICIES = {POLICY_AUTO, POLICY_APPROVE, POLICY_DENY}
+
+APPROVAL_PENDING = "pending_approval"
+APPROVAL_APPROVED = "approved"
+APPROVAL_REJECTED = "rejected"
+APPROVAL_EXPIRED = "expired"
+
+
+class PolicyError(Exception):
+    """Raised when a change is refused by policy before it is applied."""
+
+
+@dataclass
+class SurfacePolicy:
+    """The authorization boundary for a single knowledge surface.
+
+    A policy answers two questions for a proposed change: is this surface
+    allowed to be edited at all, and does this particular change need a human
+    to approve it before it is applied. The default posture is conservative --
+    an undeclared surface requires approval.
+    """
+
+    surface_id: str
+    level: str = POLICY_APPROVE
+    allowed_kinds: set[str] = field(default_factory=set)
+    require_gate: bool = True
+    max_approval_age_seconds: int = 86400
+
+    def validate(self) -> None:
+        if self.level not in VALID_POLICIES:
+            raise ValueError(
+                f"unsupported surface policy: {self.level} (expected one of {sorted(VALID_POLICIES)})"
+            )
+
+    def decide(self, change_kind: str) -> str:
+        """Return ``auto``, ``approve``, or ``deny`` for a change of this kind."""
+        self.validate()
+        if self.level == POLICY_DENY:
+            return POLICY_DENY
+        if self.allowed_kinds and change_kind not in self.allowed_kinds:
+            return POLICY_DENY
+        if self.level == POLICY_AUTO:
+            return POLICY_AUTO
+        return POLICY_APPROVE
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "surface_id": self.surface_id,
+            "level": self.level,
+            "allowed_kinds": sorted(self.allowed_kinds),
+            "require_gate": self.require_gate,
+            "max_approval_age_seconds": self.max_approval_age_seconds,
+        }
+
+
+SANDBOX_POLICY = SurfacePolicy(
+    surface_id="sandbox",
+    level=POLICY_AUTO,
+    allowed_kinds={"append_section"},
+)
+
+
+def resolve_policy(surface_id: str, declared: dict[str, Any] | None = None) -> SurfacePolicy:
+    """Resolve a surface policy, defaulting unknown surfaces to require approval.
+
+    The sandbox is the only surface that is trusted by default because Geiter
+    owns it and it holds no real content. Every other surface -- including any
+    real knowledge base -- must be explicitly declared and starts at
+    ``approve``, so a mistake can never silently mutate real content.
+    """
+    if surface_id == "sandbox" and not declared:
+        return SANDBOX_POLICY
+    policy = SurfacePolicy(
+        surface_id=surface_id,
+        level=(declared or {}).get("level", POLICY_APPROVE),
+        allowed_kinds=set((declared or {}).get("allowed_kinds", []) or []),
+        require_gate=(declared or {}).get("require_gate", True),
+        max_approval_age_seconds=(declared or {}).get("max_approval_age_seconds", 86400),
+    )
+    policy.validate()
+    return policy
 
 
 @dataclass
@@ -290,3 +383,154 @@ def execute_cycle(
             else "Change reverted; the gate rejected it. Try a different change."
         ),
     }
+
+
+def request_approval(
+    store: GeiterStore,
+    surface_id: str,
+    heading: str,
+    body: str,
+    policy: SurfacePolicy,
+    kind: str = "append_section",
+) -> dict[str, Any]:
+    """Record a change that policy requires a human to approve before applying.
+
+    The request is persisted so it survives across processes and can be approved
+    or rejected later by something other than the proposing agent. Nothing is
+    mutated on the surface here.
+    """
+    request = store.add(
+        "approvals",
+        "change.approval_request",
+        {
+            "surface_id": surface_id,
+            "kind": kind,
+            "heading": heading.strip(),
+            "body": body.strip(),
+            "policy": policy.to_dict(),
+            "status": APPROVAL_PENDING,
+            "requested_at": now_iso(),
+        },
+    )
+    store.event("approvals.requested", {"request_id": request["id"], "surface_id": surface_id})
+    return request
+
+
+def decide_approval(
+    store: GeiterStore,
+    request_id: str,
+    decision: str,
+    approver: str,
+) -> dict[str, Any]:
+    """Approve or reject a pending change request.
+
+    Only a pending request can be decided, and the decision records who made it
+    so the audit trail attributes the change to a specific approver. An approved
+    request is still subject to the regression gate when it is finally applied.
+    """
+    if decision not in {APPROVAL_APPROVED, APPROVAL_REJECTED}:
+        raise ValueError(f"unsupported approval decision: {decision}")
+    if not approver.strip():
+        raise ValueError("an approver is required to decide an approval request")
+    state = store.read()
+    request = next((item for item in state.get("approvals", []) if item["id"] == request_id), None)
+    if request is None or request.get("kind") != "change.approval_request":
+        raise ValueError(f"unknown approval request: {request_id}")
+    if request["data"].get("status") != APPROVAL_PENDING:
+        return request
+    request["data"]["status"] = decision
+    request["data"]["approver"] = approver.strip()
+    request["data"]["decided_at"] = now_iso()
+    store._write(state)
+    store.event("approvals.decided", {"request_id": request_id, "decision": decision, "approver": approver})
+    return request
+
+
+def list_approvals(store: GeiterStore, status: str | None = APPROVAL_PENDING) -> list[dict[str, Any]]:
+    requests = [
+        item for item in store.read().get("approvals", [])
+        if item.get("kind") == "change.approval_request"
+    ]
+    if status is not None:
+        requests = [item for item in requests if item["data"].get("status") == status]
+    return requests
+
+
+def execute_governed(
+    store: GeiterStore,
+    surface_id: str,
+    heading: str,
+    body: str,
+    provider_factory: Any,
+    declared_policy: dict[str, Any] | None = None,
+    baseline_id: str | None = None,
+    target: str | None = None,
+    request_id: str | None = None,
+) -> dict[str, Any]:
+    """Execute a change only if policy allows it, otherwise request approval.
+
+    This is the entry point for any surface that is not the trusted sandbox. It
+    resolves the surface policy first:
+
+    - ``deny``: refuse the change outright.
+    - ``auto``: run the gated cycle immediately.
+    - ``approve``: require an approved request; if none exists, create one and
+      return a ``pending_approval`` outcome without touching the surface.
+
+    Even an approved change still has to survive the regression gate, so
+    approval only authorizes the *attempt*, never the outcome.
+    """
+    policy = resolve_policy(surface_id, declared_policy)
+    decision = policy.decide("append_section")
+    surface = SandboxSurface(store.root) if surface_id == "sandbox" else None
+
+    if decision == POLICY_DENY:
+        return {
+            "schema": "geiter/execution-v1",
+            "status": "denied",
+            "surface_id": surface_id,
+            "policy": policy.to_dict(),
+            "next_action": "Policy denies changes to this surface; no mutation was attempted.",
+        }
+
+    if decision == POLICY_APPROVE:
+        approved = None
+        if request_id:
+            request = next(
+                (item for item in store.read().get("approvals", []) if item["id"] == request_id),
+                None,
+            )
+            if request is None or request.get("kind") != "change.approval_request":
+                raise ValueError(f"unknown approval request: {request_id}")
+            if request["data"].get("status") != APPROVAL_APPROVED:
+                approved = None
+            else:
+                approved = request
+        if approved is None:
+            request = request_approval(store, surface_id, heading, body, policy)
+            return {
+                "schema": "geiter/execution-v1",
+                "status": APPROVAL_PENDING,
+                "surface_id": surface_id,
+                "policy": policy.to_dict(),
+                "approval_request_id": request["id"],
+                "next_action": "A human must approve this change before it is applied.",
+            }
+        heading = approved["data"]["heading"]
+        body = approved["data"]["body"]
+
+    # decision == auto, or an approved request: run the gated cycle.
+    result = execute_cycle(
+        store,
+        heading,
+        body,
+        provider_factory=provider_factory,
+        baseline_id=baseline_id,
+        target=target,
+    )
+    result["status"] = "executed"
+    result["surface_id"] = surface_id
+    result["policy"] = policy.to_dict()
+    if request_id and decision == POLICY_APPROVE:
+        result["approval_request_id"] = request_id
+    return result

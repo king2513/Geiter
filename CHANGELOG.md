@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.25.0 - 2026-10-08
+
+- added a surface policy gate with `auto`, `approve`, and `deny` levels; every surface other than the trusted sandbox defaults to requiring human approval
+- added a durable approval workflow where a governed change becomes a `pending_approval` request that persists across processes until a named approver approves or rejects it
+- made approval authorize only the attempt, never the outcome, because the regression gate still accepts or reverts the applied change
+- added `execute_governed` so autonomous execution can target a declared real surface without ever mutating it implicitly
+- exposed `govern propose|approve|reject|list` through the CLI and the `geiter_govern` and `geiter_approvals` gateway tools, and declared the `geiter/approvals-v1` contract in capabilities metadata
+
 ## 1.24.0 - 2026-10-08
 
 - added autonomous execution: a propose/apply/verify cycle that lets Geiter act on its own knowledge surface instead of only measuring and proposing
