@@ -331,6 +331,28 @@ python -m geiter --help
 
 See [docs/agent-contract.md](docs/agent-contract.md), [CONTRIBUTING.md](CONTRIBUTING.md), and [CHANGELOG.md](CHANGELOG.md) for the machine contract and release history.
 
+### Module layout
+
+`geiter.core.GeiterStore` stays the single public entry point. It composes the
+store from focused mixin modules so each responsibility lives in its own file:
+
+| Module | Responsibility |
+| --- | --- |
+| `core` | Composition root, state lock, record primitive, version |
+| `persistence` | Durable state, event log, record creation |
+| `observations` | Retrieval prompts and provider observations |
+| `runs` | Provider run ledgers and retries |
+| `actions` | Agent action queue, claims, leases, recovery |
+| `analysis` | Metrics, health, matrix, score, introspection, reports |
+| `baselines` | Baseline snapshots and paired comparisons |
+| `experiments` | Policy-gated experiments and results |
+| `gate` | The regression gate |
+| `iteration` | The self-iteration decision loop |
+| `surfaces` | Status, context, capabilities, connection config |
+
+`core.py` also owns the cross-process file lock and the `Record` primitive, so
+the mixins import those shared pieces from it without creating a cycle.
+
 ## Next frontier
 
 The active project frontier is live provider adapters, richer retrieval evaluators, policy-gated experiments, and a SQLite backend when query volume outgrows the local JSON contract.
