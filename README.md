@@ -31,6 +31,8 @@ Geiter is an agent-native runtime for Generative Engine Optimization (GEO). It g
 - durable regression gate verdicts available after the original run response
 - policy-gated experiment proposals with explicit approval
 - experiment result ledger linking evidence, comparisons, and learnings
+- direction-safe north-star score with a weakest-dimension pointer
+- read-only self-introspection that ranks evidence-backed improvement opportunities
 - evidence-aware `iterate` cycles that consume comparisons and pending experiments
 - persistent prioritized agent action queue with evidence-backed completion
 - agent-proposed actions with deduplication and explicit priorities
@@ -53,6 +55,8 @@ python -m geiter prompt add "What is Geiter?" --intent discovery
 python -m geiter prompt list --json
 python -m geiter observe <prompt-id> --provider fixture --answer "Geiter is an agent-native GEO runtime." --citation https://example.com/geiter
 python -m geiter analyze --json
+python -m geiter score --json
+python -m geiter introspect --json
 python -m geiter health --json
 python -m geiter matrix --json
 python -m geiter doctor --json
@@ -137,7 +141,7 @@ printf '%s\n' \
   | python -m geiter gateway
 ```
 
-Tools include `geiter_status`, `geiter_context`, `geiter_add_prompt`, `geiter_record_observation`, `geiter_analyze`, `geiter_health`, `geiter_runs`, `geiter_report`, `geiter_resume`, `geiter_regression`, `geiter_matrix`, `geiter_save_baseline`, `geiter_compare`, `geiter_propose_experiment`, `geiter_record_experiment_result`, `geiter_iterate`, `geiter_actions`, `geiter_propose_action`, `geiter_complete_action`, `geiter_skip_action`, `geiter_reclaim_action`, `geiter_connect`, and `geiter_capabilities`. Resources include `geiter://status`, `geiter://context`, `geiter://report`, and `geiter://capabilities`.
+Tools include `geiter_status`, `geiter_context`, `geiter_add_prompt`, `geiter_record_observation`, `geiter_analyze`, `geiter_score`, `geiter_introspect`, `geiter_health`, `geiter_runs`, `geiter_report`, `geiter_resume`, `geiter_regression`, `geiter_matrix`, `geiter_save_baseline`, `geiter_compare`, `geiter_propose_experiment`, `geiter_record_experiment_result`, `geiter_iterate`, `geiter_actions`, `geiter_propose_action`, `geiter_complete_action`, `geiter_skip_action`, `geiter_reclaim_action`, `geiter_connect`, and `geiter_capabilities`. Resources include `geiter://status`, `geiter://context`, `geiter://report`, `geiter://score`, `geiter://introspect`, and `geiter://capabilities`.
 
 An agent can call `geiter_context` or read `geiter://context` once at startup
 to receive capabilities, workspace status, quality checks, queued work, and a
@@ -220,6 +224,23 @@ Pass `--max-attempts N` to retry only failed prompts up to `N` total attempts;
 successful prompts are never replayed. A run with remaining retryable prompts
 can be continued later with `resume <run-id>`; the provider and fixture are
 supplied again so the ledger remains portable and auditable.
+
+## Self-assessment
+
+Geiter can answer two questions an agent needs before choosing its next move:
+
+- `score` (`geiter/score-v1`) aggregates the retrieval signals into one
+  direction-safe north-star value between 0 and 100, together with per-dimension
+  detail and a `weakest_dimension` pointer. Higher is always better, so a rising
+  score means the knowledge surface is easier to discover and attribute. When the
+  usable sample is too small the score reports `insufficient_data` instead of
+  inventing a number.
+- `introspect` (`geiter/introspect-v1`) is read-only and ranks the most valuable
+  improvement opportunities by combining coverage gaps, observation health, and the
+  weakest coverage-matrix cells, each with the evidence that produced it.
+
+Both are read-only, are exposed through the CLI, the gateway, and MCP-style
+resources, and surface a bounded form in the agent bootstrap context.
 
 ## Design principles
 

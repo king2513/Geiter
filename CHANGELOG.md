@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.22.0 - 2026-10-08
+
+- added a direction-safe north-star score (`geiter/score-v1`) that aggregates mention, target citation, citation rank, and coverage into one 0-100 value with a `weakest_dimension`
+- added read-only self-introspection (`geiter/introspect-v1`) that ranks evidence-backed improvement opportunities from coverage, health, and matrix gaps
+- exposed `score` and `introspect` through the CLI, gateway tools, and resources
+- surfaced bounded self-assessment in `report` and the agent bootstrap context
+- declared the self-assessment contract in capabilities metadata
+
 ## 1.21.0 - 2026-10-08
 
 - made action claims owner-aware and rejected claims by competing agents

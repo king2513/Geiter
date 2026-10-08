@@ -67,6 +67,10 @@ def parser() -> argparse.ArgumentParser:
 
     analyze = commands.add_parser("analyze", help="Analyze retrieval observations")
     analyze.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
+    score = commands.add_parser("score", help="Compute the north-star GEO score")
+    score.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
+    introspect = commands.add_parser("introspect", help="Rank evidence-backed improvement opportunities")
+    introspect.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
     health = commands.add_parser("health", help="Assess observation and provider quality")
     health.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
     matrix = commands.add_parser("matrix", help="Analyze coverage by provider and prompt intent")
@@ -212,6 +216,10 @@ def main(argv: list[str] | None = None) -> None:
         }
     elif args.command == "analyze":
         result = store.analyze()
+    elif args.command == "score":
+        result = store.score()
+    elif args.command == "introspect":
+        result = store.introspect()
     elif args.command == "health":
         result = store.health()
     elif args.command == "matrix":

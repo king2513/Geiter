@@ -256,6 +256,46 @@ class GeiterStoreTests(unittest.TestCase):
         self.assertEqual(first["id"], second["id"])
         self.assertEqual(len(self.store.read()["prompts"]), 1)
 
+    def test_score_reports_insufficient_data_on_empty_workspace(self):
+        self.store.init()
+        score = self.store.score()
+        self.assertEqual(score["schema"], "geiter/score-v1")
+        self.assertEqual(score["status"], "insufficient_data")
+        self.assertIsNone(score["north_star"])
+        self.assertIsNone(score["weakest_dimension"])
+
+    def test_score_is_direction_safe_and_finds_weakest_dimension(self):
+        self.store.init()
+        prompt_a = self.store.add_prompt("What is Geiter?", "discovery")
+        prompt_b = self.store.add_prompt("Why use Geiter?", "evaluation")
+        # Both mention the target and attribute a citation to it.
+        self.store.record_observation(prompt_a["id"], "provider-a", "Geiter is great.", ["https://geiter.dev/docs"])
+        self.store.record_observation(prompt_b["id"], "provider-a", "Geiter helps.", ["https://geiter.dev/why"])
+        strong = self.store.score()
+        self.assertEqual(strong["status"], "scored")
+        self.assertGreater(strong["north_star"], 0)
+        # A mentioned-but-never-cited observation should drag the score down.
+        self.store.record_observation(prompt_b["id"], "provider-b", "Geiter again.", [])
+        weak = self.store.score()
+        self.assertLess(weak["north_star"], strong["north_star"])
+        self.assertEqual(weak["weakest_dimension"], "target_citation")
+
+    def test_introspect_ranks_evidence_backed_opportunities(self):
+        self.store.init()
+        prompt_a = self.store.add_prompt("What is Geiter?", "discovery")
+        self.store.record_observation(prompt_a["id"], "provider-a", "Geiter is great.", ["https://geiter.dev/docs"])
+        unobserved = self.store.add_prompt("Never observed prompt?", "discovery")
+        result = self.store.introspect()
+        self.assertEqual(result["schema"], "geiter/introspect-v1")
+        self.assertEqual(result["status"], "actionable")
+        opportunities = {item["opportunity"]: item for item in result["opportunities"]}
+        self.assertIn("observe_uncovered_prompts", opportunities)
+        self.assertIn(
+            unobserved["id"],
+            opportunities["observe_uncovered_prompts"]["evidence"]["unobserved_prompt_ids"],
+        )
+        self.assertEqual(result["opportunities"][0]["priority"], "high")
+
     def test_observation_metrics_and_analysis(self):
         self.store.init()
         prompt = self.store.add_prompt("What is Geiter?", "discovery")
@@ -899,13 +939,46 @@ class GeiterStoreTests(unittest.TestCase):
         uris = {item["uri"] for item in listed["result"]["content"][0]["json"]["resources"]}
         self.assertEqual(
             uris,
-            {"geiter://status", "geiter://context", "geiter://report", "geiter://capabilities"},
+            {
+                "geiter://status",
+                "geiter://context",
+                "geiter://report",
+                "geiter://capabilities",
+                "geiter://score",
+                "geiter://introspect",
+            },
         )
         read = dispatch(self.store, {
             "jsonrpc": "2.0", "id": 5, "method": "resources/read",
             "params": {"uri": "geiter://status"},
         })
         self.assertEqual(read["result"]["content"][0]["json"]["contents"][0]["uri"], "geiter://status")
+
+    def test_gateway_exposes_self_assessment_surfaces(self):
+        self.store.init()
+        listed = dispatch(self.store, {"jsonrpc": "2.0", "id": 40, "method": "tools/list"})
+        names = {tool["name"] for tool in listed["result"]["content"][0]["json"]["tools"]}
+        self.assertIn("geiter_score", names)
+        self.assertIn("geiter_introspect", names)
+        score = dispatch(self.store, {
+            "jsonrpc": "2.0", "id": 41, "method": "tools/call",
+            "params": {"name": "geiter_score", "arguments": {}},
+        })
+        self.assertEqual(
+            score["result"]["content"][0]["json"]["schema"], "geiter/score-v1"
+        )
+        introspect = dispatch(self.store, {
+            "jsonrpc": "2.0", "id": 42, "method": "tools/call",
+            "params": {"name": "geiter_introspect", "arguments": {}},
+        })
+        self.assertEqual(
+            introspect["result"]["content"][0]["json"]["schema"], "geiter/introspect-v1"
+        )
+        read = dispatch(self.store, {
+            "jsonrpc": "2.0", "id": 43, "method": "resources/read",
+            "params": {"uri": "geiter://score"},
+        })
+        self.assertEqual(read["result"]["content"][0]["json"]["contents"][0]["uri"], "geiter://score")
 
     def test_gateway_exposes_experiment_tools(self):
         self.store.init()

@@ -458,8 +458,6 @@ class GeiterStore:
             "state_schema": "geiter/v1",
             "report_schemas": [
                 "geiter/analysis-v1",
-                "geiter/score-v1",
-                "geiter/introspect-v1",
                 "geiter/health-v1",
                 "geiter/matrix-v1",
                 "geiter/comparison-v1",
@@ -484,8 +482,6 @@ class GeiterStore:
                 "resume": "python -m geiter resume <run-id> --provider <name> [provider options] --json",
                 "iteration": "python -m geiter iterate --json",
                 "context": "python -m geiter context --json",
-                "score": "python -m geiter score --json",
-                "introspect": "python -m geiter introspect --json",
                 "actions": "python -m geiter action list --json",
                 "propose_action": "python -m geiter action propose --type <type> --prompt <text> --json",
             },
@@ -510,19 +506,6 @@ class GeiterStore:
                 "passing_verdicts": ["improved", "flat"],
                 "persisted_on": "runs[].data.gate",
                 "latest_report_field": "latest_gate",
-            },
-            "self_assessment": {
-                "score_schema": "geiter/score-v1",
-                "introspect_schema": "geiter/introspect-v1",
-                "score_range": [0, 100],
-                "score_direction": "higher_is_better",
-                "score_statuses": ["scored", "insufficient_data"],
-                "insufficient_data_rule": (
-                    "fewer than the minimum usable sample produces no north_star value"
-                ),
-                "dimensions": ["mention", "target_citation", "citation_rank", "coverage"],
-                "introspect_statuses": ["actionable", "healthy"],
-                "read_only": True,
             },
             "action_queue": {
                 "record_kind": "agent.action",
@@ -599,12 +582,6 @@ class GeiterStore:
             "quality": {
                 "health": report["health"],
                 "doctor": report["doctor"],
-            },
-            "self_assessment": {
-                "score": report["score"]["status"],
-                "north_star": report["score"]["north_star"],
-                "weakest_dimension": report["score"]["weakest_dimension"],
-                "next_opportunity": report["introspect"]["next_action"],
             },
             "latest_iteration": latest_iteration,
             "latest_learning": latest_learning,
@@ -1163,172 +1140,6 @@ class GeiterStore:
         ]
         return self._analyze_observations(state, observations)
 
-    def score(self) -> dict[str, Any]:
-        """Aggregate retrieval metrics into one direction-safe north-star score.
-
-        Every dimension is normalized so that higher is always better, so a rising
-        score always means the knowledge surface is easier to discover and cite.
-        Dimensions with too few samples to be meaningful are reported as
-        ``insufficient_data`` instead of being folded into a misleading total.
-        """
-        analysis = self.analyze()
-        metrics = analysis["metrics"]
-        coverage = analysis["coverage"]
-        sample_size = metrics["sample_size"]
-        minimum_sample = 2
-        dimensions = [
-            {
-                "name": "mention",
-                "value": metrics["mention_rate"],
-                "weight": 0.25,
-                "sample_size": sample_size,
-                "description": "How often providers mention the target by name.",
-            },
-            {
-                "name": "target_citation",
-                "value": metrics["target_citation_rate"],
-                "weight": 0.35,
-                "sample_size": sample_size,
-                "description": "How often providers attribute a citation to the target; the strongest trust signal.",
-            },
-            {
-                "name": "citation_rank",
-                "value": metrics["mean_citation_reciprocal_rank"],
-                "weight": 0.20,
-                "sample_size": sample_size,
-                "description": "Direction-safe citation rank quality (1 / position).",
-            },
-            {
-                "name": "coverage",
-                "value": (
-                    round(
-                        coverage["observed_prompts"] / coverage["prompts"], 4
-                    )
-                    if coverage["prompts"]
-                    else None
-                ),
-                "weight": 0.20,
-                "sample_size": coverage["prompts"],
-                "description": "Share of configured prompts that have at least one usable observation.",
-            },
-        ]
-        scored = [item for item in dimensions if item["value"] is not None]
-        total_weight = sum(item["weight"] for item in scored)
-        sufficient = sample_size >= minimum_sample
-        if not scored or not sufficient or total_weight == 0:
-            north_star = None
-        else:
-            north_star = round(
-                sum(item["value"] * item["weight"] for item in scored) / total_weight * 100,
-                2,
-            )
-        ranked = sorted(scored, key=lambda item: (item["value"], -item["weight"]))
-        weakest_dimension = ranked[0]["name"] if ranked else None
-        return {
-            "schema": "geiter/score-v1",
-            "generated_at": now(),
-            "status": "scored" if north_star is not None else "insufficient_data",
-            "north_star": north_star,
-            "minimum_sample": minimum_sample,
-            "sample_size": sample_size,
-            "dimensions": dimensions,
-            "weakest_dimension": weakest_dimension,
-            "next_action": (
-                f"Improve the weakest dimension '{weakest_dimension}' before expanding coverage."
-                if weakest_dimension and sufficient
-                else "Collect more usable observations before trusting a north-star score."
-            ),
-        }
-
-    def introspect(self) -> dict[str, Any]:
-        """Answer "what should I improve first?" from coverage, health, and score.
-
-        The result is a ranked list of evidence-backed improvement opportunities so
-        an agent can pick the smallest highest-value change instead of guessing.
-        This method is read-only: it never mutates workspace state.
-        """
-        state = self.read()
-        score = self.score()
-        analysis = self.analyze()
-        health = self.health()
-        matrix = self.analyze_matrix()
-        opportunities: list[dict[str, Any]] = []
-
-        unobserved = analysis["coverage"]["unobserved_prompt_ids"]
-        if unobserved:
-            opportunities.append({
-                "opportunity": "observe_uncovered_prompts",
-                "priority": "high",
-                "evidence": {"unobserved_prompt_ids": unobserved},
-                "detail": (
-                    f"{len(unobserved)} configured prompts have never been observed; "
-                    "their retrieval behavior is unknown."
-                ),
-            })
-
-        if health["unusable_count"]:
-            opportunities.append({
-                "opportunity": "repair_unusable_observations",
-                "priority": "high",
-                "evidence": {"unusable_count": health["unusable_count"]},
-                "detail": (
-                    f"{health['unusable_count']} observations are unusable and excluded from "
-                    "aggregates; repair them before trusting the score."
-                ),
-            })
-
-        for cell in matrix["weakest_cells"]:
-            cell_metrics = cell["analysis"]["metrics"]
-            if cell_metrics["target_citation_rate"] == 0 and cell_metrics["sample_size"]:
-                opportunities.append({
-                    "opportunity": "strengthen_attribution",
-                    "priority": "normal",
-                    "evidence": {
-                        "provider": cell["provider"],
-                        "intent": cell["intent"],
-                        "target_citation_rate": cell_metrics["target_citation_rate"],
-                    },
-                    "detail": (
-                        f"Cell {cell['provider']}::{cell['intent']} is mentioned but never "
-                        "attributed a citation; strengthen attributable source material."
-                    ),
-                })
-
-        if not health["providers"]:
-            opportunities.append({
-                "opportunity": "connect_provider",
-                "priority": "critical",
-                "evidence": {"provider_count": 0},
-                "detail": "No provider observations exist yet; add prompts and record a first batch.",
-            })
-
-        if score.get("weakest_dimension") and score.get("status") == "scored":
-            opportunities.append({
-                "opportunity": "improve_weakest_dimension",
-                "priority": "normal",
-                "evidence": {"weakest_dimension": score["weakest_dimension"]},
-                "detail": score["next_action"],
-            })
-
-        rank = {"critical": 0, "high": 1, "normal": 2}
-        opportunities.sort(key=lambda item: rank.get(item["priority"], 9))
-        return {
-            "schema": "geiter/introspect-v1",
-            "generated_at": now(),
-            "status": "actionable" if opportunities else "healthy",
-            "opportunity_count": len(opportunities),
-            "opportunities": opportunities,
-            "score": {
-                "status": score["status"],
-                "north_star": score["north_star"],
-                "weakest_dimension": score["weakest_dimension"],
-            },
-            "next_action": (
-                opportunities[0]["detail"] if opportunities
-                else "No structural gaps detected; expand prompt and provider coverage."
-            ),
-        }
-
     def health(self) -> dict[str, Any]:
         state = self.read()
         observations = [item for item in state.get("observations", []) if item["kind"] == "retrieval.observation"]
@@ -1696,8 +1507,6 @@ class GeiterStore:
             "goals": state["goals"],
             "memory_count": len(state["memories"]),
             "analysis": analysis,
-            "score": self.score(),
-            "introspect": self.introspect(),
             "matrix": self.analyze_matrix(),
             "health": self.health(),
             "doctor": doctor,

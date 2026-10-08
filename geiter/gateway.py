@@ -57,6 +57,16 @@ TOOLS = [
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
+        "name": "geiter_score",
+        "description": "Compute the direction-safe north-star GEO score and weakest dimension.",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "geiter_introspect",
+        "description": "Rank evidence-backed opportunities for improving the knowledge surface.",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
         "name": "geiter_health",
         "description": "Assess observation quality and provider health before trusting metrics.",
         "inputSchema": {"type": "object", "properties": {}},
@@ -256,6 +266,18 @@ RESOURCES = [
         "mimeType": "application/json",
     },
     {
+        "uri": "geiter://score",
+        "name": "Geiter score",
+        "description": "Direction-safe north-star GEO score with per-dimension detail.",
+        "mimeType": "application/json",
+    },
+    {
+        "uri": "geiter://introspect",
+        "name": "Geiter introspect",
+        "description": "Ranked, evidence-backed improvement opportunities for the knowledge surface.",
+        "mimeType": "application/json",
+    },
+    {
         "uri": "geiter://capabilities",
         "name": "Geiter capabilities",
         "description": "Stable version, transport, schema, and agent entrypoint metadata.",
@@ -309,6 +331,10 @@ def dispatch(store: GeiterStore, request: dict[str, Any]) -> dict[str, Any] | No
             value = store.context()
         elif uri == "geiter://report":
             value = store.report()
+        elif uri == "geiter://score":
+            value = store.score()
+        elif uri == "geiter://introspect":
+            value = store.introspect()
         elif uri == "geiter://capabilities":
             value = store.capabilities()
         else:
@@ -335,6 +361,10 @@ def dispatch(store: GeiterStore, request: dict[str, Any]) -> dict[str, Any] | No
             )
         elif name == "geiter_analyze":
             value = store.analyze()
+        elif name == "geiter_score":
+            value = store.score()
+        elif name == "geiter_introspect":
+            value = store.introspect()
         elif name == "geiter_health":
             value = store.health()
         elif name == "geiter_runs":

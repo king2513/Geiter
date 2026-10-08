@@ -12,6 +12,8 @@ prompt add <text> [--intent <intent>] --json
 prompt list --json
 observe <prompt-id> --provider <name> --answer <text> [--citation <url>] [--run-id <run-id>] --json
 analyze --json
+score --json
+introspect --json
 health --json
 matrix --json
 doctor --json
@@ -169,3 +171,28 @@ answer(prompt: str) -> ProviderAnswer
 
 Use `target_citation_rate` for source attribution. `citation_rate` alone only
 means the provider returned some citation.
+
+## Self-assessment
+
+`score` returns a `geiter/score-v1` object. `north_star` is a single 0-100
+value where higher is always better, so it can be compared across runs. It is a
+weighted blend of four dimensions: `mention` (0.25), `target_citation` (0.35),
+`citation_rank` (0.20, the direction-safe reciprocal rank), and `coverage` (0.20,
+the share of configured prompts with at least one usable observation). Each
+dimension is reported with its own value, weight, and sample size. When the
+usable sample is smaller than `minimum_sample`, the score reports
+`status = insufficient_data` and no `north_star` value rather than presenting a
+misleading total. `weakest_dimension` names the lowest-scoring dimension that has
+enough data to be meaningful.
+
+`introspect` returns a `geiter/introspect-v1` object. It is read-only and ranks
+`opportunities` by priority from three evidence sources: unobserved configured
+prompts, unusable observations that are excluded from aggregates, and
+coverage-matrix cells that are mentioned but never attributed a citation. Each
+opportunity carries the evidence that produced it. This is the surface an agent
+should read to decide which single change to make next.
+
+Both surfaces are available as the CLI commands `score` and `introspect`, the
+gateway tools `geiter_score` and `geiter_introspect`, and the resources
+`geiter://score` and `geiter://introspect`. A bounded form is included in
+`report` and in the agent bootstrap context as `self_assessment`.
