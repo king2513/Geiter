@@ -5,6 +5,7 @@ import json
 from typing import Any
 
 from .core import GeiterStore
+from .execute import SandboxSurface, execute_cycle, surface_provider_factory
 from .gateway import serve
 from .providers import load_provider, regression_run, resume_provider, run_provider
 
@@ -116,6 +117,16 @@ def parser() -> argparse.ArgumentParser:
     iterate = commands.add_parser("iterate", help="Run one self-iteration cycle")
     iterate.add_argument("--hypothesis")
     iterate.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
+
+    execute = commands.add_parser(
+        "execute",
+        help="Run one autonomous propose/apply/verify cycle on the sandbox surface",
+    )
+    execute.add_argument("--heading", required=True, help="Section heading for the change")
+    execute.add_argument("--body", required=True, help="Body content for the change")
+    execute.add_argument("--baseline-id", help="Baseline used to judge the change")
+    execute.add_argument("--target", help="Target token used for attribution")
+    execute.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
 
     goal = commands.add_parser("goal", help="Manage goals")
     goal.add_argument("action", choices=("add", "list"))
@@ -284,6 +295,17 @@ def main(argv: list[str] | None = None) -> None:
                 result = store.reclaim_action(args.action_id, evidence)
     elif args.command == "iterate":
         result = store.iterate(args.hypothesis)
+    elif args.command == "execute":
+        target = args.target or store.read()["identity"]["name"]
+        surface = SandboxSurface(store.root)
+        result = execute_cycle(
+            store,
+            args.heading,
+            args.body,
+            provider_factory=surface_provider_factory(surface, target),
+            baseline_id=args.baseline_id,
+            target=target,
+        )
     elif args.command == "goal":
         if args.action == "add":
             if not args.text:

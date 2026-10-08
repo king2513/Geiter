@@ -17,6 +17,7 @@ from geiter.providers import (
     resume_provider,
     run_provider,
 )
+from geiter.execute import SandboxSurface, execute_cycle, surface_provider_factory
 
 
 class GeiterStoreTests(unittest.TestCase):
@@ -335,6 +336,80 @@ class GeiterStoreTests(unittest.TestCase):
         self.assertEqual(matrix["cell_count"], 2)
         self.assertEqual(matrix["weakest_cells"][0]["provider"], "provider-b")
         self.assertEqual(matrix["weakest_cells"][0]["intent"], "evaluation")
+
+    def test_sandbox_surface_apply_and_revert(self):
+        surface = SandboxSurface(self.tempdir.name)
+        info = surface.ensure()
+        self.assertTrue(info["created"])
+        before = surface.read()
+        snapshot = surface.snapshot("chg_test")
+        surface.append_section("Geiter: overview", "Geiter is a runtime.")
+        self.assertIn("Geiter: overview", surface.read())
+        revert = surface.revert("chg_test")
+        self.assertTrue(revert["reverted"])
+        self.assertEqual(surface.read(), before)
+        self.assertTrue(snapshot.exists())
+
+    def test_execute_cycle_accepts_a_change_the_gate_approves(self):
+        store = GeiterStore(self.tempdir.name)
+        store.init()
+        target = store.read()["identity"]["name"]
+        store.add_prompt("What is Geiter?", "discovery")
+        store.add_prompt("Why use Geiter?", "evaluation")
+        surface = SandboxSurface(self.tempdir.name)
+        surface.ensure()
+        result = execute_cycle(
+            store,
+            heading=f"{target}: overview",
+            body=f"{target} is an agent-native GEO runtime that is cited.",
+            provider_factory=surface_provider_factory(surface, target),
+            target=target,
+        )
+        self.assertEqual(result["schema"], "geiter/execution-v1")
+        self.assertTrue(result["verdict"]["accepted"], result["verdict"])
+        self.assertTrue(result["gate"]["ok"])
+        self.assertIn("Geiter: overview", surface.read())
+
+    def test_execute_cycle_reverts_a_change_the_gate_rejects(self):
+        store = GeiterStore(self.tempdir.name)
+        store.init()
+        target = store.read()["identity"]["name"]
+        surface = SandboxSurface(self.tempdir.name)
+        surface.ensure()
+        before = surface.read()
+        result = execute_cycle(
+            store,
+            heading=f"{target}: rejected",
+            body="This change must be reverted because the gate fails with no prompts.",
+            provider_factory=surface_provider_factory(surface, target),
+            target=target,
+        )
+        self.assertFalse(result["verdict"]["accepted"])
+        self.assertFalse(result["gate"]["ok"])
+        self.assertIn("prompts_present", result["verdict"]["gate_failed_checks"])
+        self.assertTrue(result["verdict"]["revert"]["reverted"])
+        self.assertEqual(surface.read(), before)
+
+    def test_execute_cycle_records_an_execution_learning(self):
+        store = GeiterStore(self.tempdir.name)
+        store.init()
+        target = store.read()["identity"]["name"]
+        store.add_prompt("What is Geiter?")
+        surface = SandboxSurface(self.tempdir.name)
+        surface.ensure()
+        result = execute_cycle(
+            store,
+            heading=f"{target}: note",
+            body=f"{target} is referenced and cited for this note.",
+            provider_factory=surface_provider_factory(surface, target),
+            target=target,
+        )
+        learnings = [
+            item for item in store.read()["learnings"]
+            if item["kind"] == "execution.result"
+        ]
+        self.assertEqual(len(learnings), 1)
+        self.assertEqual(learnings[0]["data"]["change_id"], result["verdict"]["change_id"])
 
     def test_prompt_identity_is_deterministic_and_deduplicated(self):
         self.store.init()
@@ -1047,6 +1122,7 @@ class GeiterStoreTests(unittest.TestCase):
         names = {tool["name"] for tool in listed["result"]["content"][0]["json"]["tools"]}
         self.assertIn("geiter_score", names)
         self.assertIn("geiter_introspect", names)
+        self.assertIn("geiter_execute", names)
         score = dispatch(self.store, {
             "jsonrpc": "2.0", "id": 41, "method": "tools/call",
             "params": {"name": "geiter_score", "arguments": {}},
@@ -1066,6 +1142,25 @@ class GeiterStoreTests(unittest.TestCase):
             "params": {"uri": "geiter://score"},
         })
         self.assertEqual(read["result"]["content"][0]["json"]["contents"][0]["uri"], "geiter://score")
+
+    def test_gateway_execute_runs_a_verified_cycle(self):
+        self.store.init()
+        self.store.add_prompt("What is Geiter?")
+        target = self.store.read()["identity"]["name"]
+        response = dispatch(self.store, {
+            "jsonrpc": "2.0", "id": 50, "method": "tools/call",
+            "params": {
+                "name": "geiter_execute",
+                "arguments": {
+                    "heading": f"{target}: gateway",
+                    "body": f"{target} is cited for this gateway exercise.",
+                },
+            },
+        })
+        payload = response["result"]["content"][0]["json"]
+        self.assertEqual(payload["schema"], "geiter/execution-v1")
+        self.assertIn("verdict", payload)
+        self.assertIn("change_id", payload["verdict"])
 
     def test_gateway_exposes_experiment_tools(self):
         self.store.init()

@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.24.0 - 2026-10-08
+
+- added autonomous execution: a propose/apply/verify cycle that lets Geiter act on its own knowledge surface instead of only measuring and proposing
+- added a local sandbox surface with per-change snapshots so any applied change is fully reversible
+- made the regression gate the arbiter: a change is kept only when the evidence gate accepts it, and is automatically reverted when it does not
+- added a surface-aware provider that answers from the live surface, so the gate judges a change's real effect rather than a canned response
+- exposed `execute` through the CLI and the `geiter_execute` gateway tool, and declared the `geiter/execution-v1` contract in capabilities metadata
+
 ## 1.23.0 - 2026-10-08
 
 - added a reentrant cross-process file lock around every state-mutating operation to prevent lost updates when multiple agents share a workspace

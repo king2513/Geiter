@@ -32,6 +32,7 @@ experiment propose --hypothesis <text> --change <text> [--risk <level>] --json
 experiment approve --id <experiment-id> --json
 experiment result --id <experiment-id> --outcome <supported|rejected|inconclusive> --evidence <text> --json
 iterate [--hypothesis <text>] --json
+execute --heading <heading> --body <body> [--baseline-id <id>] [--target <token>] --json
 action list [--status <open|in_progress|completed|skipped|stale|all>] --json
 action propose --type <type> --prompt <text> [--priority <normal|high|critical>] [--source <source>] [--dedupe-key <key>] --json
 action complete <action-id> --evidence <text> --json
@@ -207,3 +208,24 @@ Both surfaces are available as the CLI commands `score` and `introspect`, the
 gateway tools `geiter_score` and `geiter_introspect`, and the resources
 `geiter://score` and `geiter://introspect`. A bounded form is included in
 `report` and in the agent bootstrap context as `self_assessment`.
+
+## Autonomous execution
+
+`execute` returns a `geiter/execution-v1` object and runs one verified change
+cycle:
+
+1. `propose` derives a change from `introspect`, so it is grounded in evidence.
+2. `snapshot` records the current surface so the change is reversible.
+3. `apply` edits the local sandbox surface.
+4. `re-observe` runs a surface-aware provider that answers from the live content.
+5. `gate` evaluates the change with the existing regression gate.
+6. `accept or revert` keeps the change when the gate passes, otherwise restores
+   the snapshot and records the outcome as an `execution.result` learning.
+
+The regression gate is the arbiter: an agent may act on its own, but it may not
+keep a change that its own evidence rejects. The surface is a local sandbox
+directory and a provider that reads its live content, so the gate judges the
+real effect of a change rather than a canned response. Nothing in this loop
+touches external or real content. The surface is available as the CLI command
+`execute` and the gateway tool `geiter_execute`, and the contract is declared in
+capabilities metadata under `autonomous_execution`.

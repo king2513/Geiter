@@ -33,6 +33,7 @@ Geiter is an agent-native runtime for Generative Engine Optimization (GEO). It g
 - experiment result ledger linking evidence, comparisons, and learnings
 - direction-safe north-star score with a weakest-dimension pointer
 - read-only self-introspection that ranks evidence-backed improvement opportunities
+- autonomous execute cycles that apply a change, verify it with the regression gate, and revert it when the evidence rejects it
 - evidence-aware `iterate` cycles that consume comparisons and pending experiments
 - persistent prioritized agent action queue with evidence-backed completion
 - agent-proposed actions with deduplication and explicit priorities
@@ -67,6 +68,7 @@ python -m geiter baseline compare --json
 python -m geiter experiment propose --hypothesis "Improve citation rate" --change "Add authoritative docs" --json
 python -m geiter experiment result --id <experiment-id> --outcome supported --evidence "Citation rate improved" --json
 python -m geiter iterate --json
+python -m geiter execute --heading "Geiter: overview" --body "Geiter is an agent-native GEO runtime." --json
 python -m geiter action propose --type investigate --prompt "Check the weakest citation cell" --priority high --json
 python -m geiter action list --json
 python -m geiter action list --status stale --json
@@ -141,7 +143,7 @@ printf '%s\n' \
   | python -m geiter gateway
 ```
 
-Tools include `geiter_status`, `geiter_context`, `geiter_add_prompt`, `geiter_record_observation`, `geiter_analyze`, `geiter_score`, `geiter_introspect`, `geiter_health`, `geiter_runs`, `geiter_report`, `geiter_resume`, `geiter_regression`, `geiter_matrix`, `geiter_save_baseline`, `geiter_compare`, `geiter_propose_experiment`, `geiter_record_experiment_result`, `geiter_iterate`, `geiter_actions`, `geiter_propose_action`, `geiter_complete_action`, `geiter_skip_action`, `geiter_reclaim_action`, `geiter_connect`, and `geiter_capabilities`. Resources include `geiter://status`, `geiter://context`, `geiter://report`, `geiter://score`, `geiter://introspect`, and `geiter://capabilities`.
+Tools include `geiter_status`, `geiter_context`, `geiter_add_prompt`, `geiter_record_observation`, `geiter_analyze`, `geiter_score`, `geiter_introspect`, `geiter_execute`, `geiter_health`, `geiter_runs`, `geiter_report`, `geiter_resume`, `geiter_regression`, `geiter_matrix`, `geiter_save_baseline`, `geiter_compare`, `geiter_propose_experiment`, `geiter_record_experiment_result`, `geiter_iterate`, `geiter_actions`, `geiter_propose_action`, `geiter_complete_action`, `geiter_skip_action`, `geiter_reclaim_action`, `geiter_connect`, and `geiter_capabilities`. Resources include `geiter://status`, `geiter://context`, `geiter://report`, `geiter://score`, `geiter://introspect`, and `geiter://capabilities`.
 
 An agent can call `geiter_context` or read `geiter://context` once at startup
 to receive capabilities, workspace status, quality checks, queued work, and a
@@ -241,6 +243,27 @@ Geiter can answer two questions an agent needs before choosing its next move:
 
 Both are read-only, are exposed through the CLI, the gateway, and MCP-style
 resources, and surface a bounded form in the agent bootstrap context.
+
+## Autonomous execution
+
+Geiter can act on its own knowledge instead of only measuring and proposing.
+`execute` runs one verified change cycle against a local sandbox surface:
+
+```text
+introspect -> propose change -> snapshot -> apply -> re-observe -> gate
+           -> accept (keep the change) or revert (roll it back)
+```
+
+The regression gate is the arbiter. A change is kept only when the evidence
+gate accepts it; if the gate rejects the change, the surface is restored from the
+snapshot taken before the change and the outcome is recorded as a learning. This
+means an agent may act autonomously while still being unable to keep an action
+that its own evidence rejects.
+
+The surface is a plain local directory (`.geiter/../sandbox`) and a
+surface-aware provider answers from its live content, so the gate judges the real
+effect of a change rather than a canned response. Nothing in this loop touches
+external or real content.
 
 ## Design principles
 

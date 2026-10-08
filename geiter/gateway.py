@@ -67,6 +67,20 @@ TOOLS = [
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
+        "name": "geiter_execute",
+        "description": "Run one autonomous propose/apply/verify cycle on the sandbox surface; the gate accepts or reverts the change.",
+        "inputSchema": {
+            "type": "object",
+            "required": ["heading", "body"],
+            "properties": {
+                "heading": {"type": "string"},
+                "body": {"type": "string"},
+                "baseline_id": {"type": "string"},
+                "target": {"type": "string"},
+            },
+        },
+    },
+    {
         "name": "geiter_health",
         "description": "Assess observation quality and provider health before trusting metrics.",
         "inputSchema": {"type": "object", "properties": {}},
@@ -365,6 +379,20 @@ def dispatch(store: GeiterStore, request: dict[str, Any]) -> dict[str, Any] | No
             value = store.score()
         elif name == "geiter_introspect":
             value = store.introspect()
+        elif name == "geiter_execute":
+            from .execute import SandboxSurface, execute_cycle, surface_provider_factory
+
+            exec_target = args.get("target") or store.read()["identity"]["name"]
+            value = execute_cycle(
+                store,
+                args["heading"],
+                args["body"],
+                provider_factory=surface_provider_factory(
+                    SandboxSurface(store.root), exec_target
+                ),
+                baseline_id=args.get("baseline_id"),
+                target=exec_target,
+            )
         elif name == "geiter_health":
             value = store.health()
         elif name == "geiter_runs":

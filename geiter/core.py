@@ -644,6 +644,18 @@ class GeiterStore:
                 "introspect_statuses": ["actionable", "healthy"],
                 "read_only": True,
             },
+            "autonomous_execution": {
+                "schema": "geiter/execution-v1",
+                "surface": "local sandbox directory (.geiter/../sandbox)",
+                "cycle": ["propose", "snapshot", "apply", "re-observe", "gate", "accept_or_revert"],
+                "arbiter": "regression gate",
+                "on_gate_failure": "revert the surface to its pre-change snapshot",
+                "safety": (
+                    "edits only a local sandbox surface, never external or real content; "
+                    "a change is kept only when the evidence gate accepts it"
+                ),
+                "entrypoint": "python -m geiter execute --heading <heading> --body <body> --json",
+            },
             "action_queue": {
                 "record_kind": "agent.action",
                 "statuses": ["open", "in_progress", "completed", "skipped"],
