@@ -101,6 +101,8 @@ class GeiterStoreTests(unittest.TestCase):
         action = self.store.propose_action("repair", "Repair interrupted work", priority="high")
         claimed = self.store.claim_action(action["id"], "itr_interrupted", lease_seconds=0)
         self.assertEqual(claimed["data"]["status"], "in_progress")
+        with self.assertRaisesRegex(ValueError, "already claimed by itr_interrupted"):
+            self.store.claim_action(action["id"], "itr_competing")
         self.assertEqual(self.store.list_actions("stale")[0]["id"], action["id"])
 
         reclaimed = self.store.reclaim_action(
@@ -119,8 +121,44 @@ class GeiterStoreTests(unittest.TestCase):
         self.store.init()
         action = self.store.propose_action("repair", "Keep active work")
         claimed = self.store.claim_action(action["id"], "itr_active", lease_seconds=3600)
+        same_owner = self.store.claim_action(action["id"], "itr_active", lease_seconds=3600)
+        self.assertEqual(same_owner["data"]["claimed_by"], "itr_active")
+        with self.assertRaisesRegex(ValueError, "already claimed by itr_active"):
+            self.store.claim_action(action["id"], "itr_other", lease_seconds=3600)
         with self.assertRaisesRegex(ValueError, "lease is still active"):
             self.store.reclaim_action(action["id"], at=claimed["data"]["claimed_at"])
+
+    def test_iteration_reports_claim_conflict_without_claiming_another_agent_action(self):
+        self.store.init()
+        action = self.store.propose_action("repair", "Keep another agent's work", priority="critical")
+        self.store.claim_action(action["id"], "itr_other", lease_seconds=3600)
+        result = self.store.iterate()
+        self.assertIsNone(result["active_action"])
+        self.assertEqual(result["claim_conflict"]["action_id"], action["id"])
+        self.assertEqual(result["action"]["data"]["decision"], "claim_conflict")
+        self.assertIn("already claimed", result["claim_conflict"]["reason"])
+        stored = self.store.list_actions("in_progress")[0]
+        self.assertEqual(stored["data"]["claimed_by"], "itr_other")
+
+    def test_iteration_preserves_failed_gate_action_conflict(self):
+        self.store.init()
+        self.store.add_prompt("What is Geiter?")
+        result = regression_run(
+            self.store,
+            self.store.prompts(),
+            load_provider("fixture"),
+            baseline_id="missing-baseline",
+        )
+        gate_action = result["gate"]["action_record"]
+        self.store.claim_action(gate_action["id"], "itr_other", lease_seconds=3600)
+        iteration = self.store.iterate()
+        self.assertIsNone(iteration["active_action"])
+        self.assertEqual(iteration["claim_conflict"]["action_id"], gate_action["id"])
+        self.assertEqual(iteration["action"]["data"]["decision"], "claim_conflict")
+        self.assertEqual(
+            self.store.list_actions("in_progress")[0]["data"]["claimed_by"],
+            "itr_other",
+        )
 
     def test_recovery_does_not_touch_completed_or_skipped_actions(self):
         self.store.init()
@@ -770,6 +808,7 @@ class GeiterStoreTests(unittest.TestCase):
             capabilities["regression_gate"]["persisted_on"],
             "runs[].data.gate",
         )
+        self.assertIn("claim_ownership", capabilities["action_queue"])
         self.store.claim_action(action["id"], "itr_test")
         active_report = self.store.report()
         self.assertEqual(active_report["open_action_count"], 0)

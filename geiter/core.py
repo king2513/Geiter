@@ -139,10 +139,33 @@ class GeiterStore:
         comparison = self.compare()
         latest_gate = self._latest_gate(state)
         queued_actions = self.list_actions()
-        active_action = self.claim_action(queued_actions[0]["id"], iteration_id) if queued_actions else None
-        if latest_gate and not latest_gate.get("ok") and active_action is None:
+        claimed_actions = self.list_actions("in_progress")
+        active_action = None
+        claim_conflict = None
+        if queued_actions:
+            try:
+                active_action = self.claim_action(queued_actions[0]["id"], iteration_id)
+            except ValueError as exc:
+                claim_conflict = {
+                    "action_id": queued_actions[0]["id"],
+                    "reason": str(exc),
+                }
+        elif claimed_actions:
+            claim_conflict = {
+                "action_id": claimed_actions[0]["id"],
+                "reason": (
+                    f"action {claimed_actions[0]['id']} is already claimed by "
+                    f"{claimed_actions[0]['data'].get('claimed_by') or 'another agent'}"
+                ),
+            }
+        if (
+            latest_gate
+            and not latest_gate.get("ok")
+            and active_action is None
+            and claim_conflict is None
+        ):
             gate_action = latest_gate.get("action", {})
-            active_action = self.propose_action(
+            gate_action_record = self.propose_action(
                 gate_action.get("type", "resolve_regression_gate"),
                 gate_action.get("prompt", "Resolve the latest failed regression gate."),
                 gate_action.get("priority", "high"),
@@ -155,12 +178,21 @@ class GeiterStore:
                     "reopened_by_iteration": iteration_id,
                 },
             )
-            active_action = self.claim_action(active_action["id"], iteration_id)
+            try:
+                active_action = self.claim_action(gate_action_record["id"], iteration_id)
+                if claim_conflict and claim_conflict["action_id"] == gate_action_record["id"]:
+                    claim_conflict = None
+            except ValueError as exc:
+                claim_conflict = {
+                    "action_id": gate_action_record["id"],
+                    "reason": str(exc),
+                }
         gate_action_reopened = bool(
             latest_gate
             and not latest_gate.get("ok")
             and active_action
             and active_action.get("data", {}).get("evidence", {}).get("reopened_by_iteration")
+            and active_action.get("data", {}).get("claimed_by") == iteration_id
         )
         pending_experiments = [
             item for item in state.get("experiments", [])
@@ -214,8 +246,14 @@ class GeiterStore:
                 "pending_experiment_ids": [item["id"] for item in pending_experiments],
                 "active_action_id": active_action["id"] if active_action else None,
                 "active_action_status": active_action["data"]["status"] if active_action else None,
+                "active_action_claimed_by": active_action["data"].get("claimed_by") if active_action else None,
+                "claim_conflict": claim_conflict,
                 "recovered_action_ids": [item["id"] for item in recovered_actions],
-                "decision": "claimed" if active_action else "no_queued_action",
+                "decision": (
+                    "claimed" if active_action
+                    else "claim_conflict" if claim_conflict
+                    else "no_queued_action"
+                ),
             },
         )
         measurement = self.add(
@@ -249,6 +287,7 @@ class GeiterStore:
             "hypothesis": hypothesis_record,
             "action": action,
             "active_action": active_action,
+            "claim_conflict": claim_conflict,
             "recovered_actions": recovered_actions,
             "comparison": comparison,
             "latest_gate": latest_gate,
@@ -478,6 +517,7 @@ class GeiterStore:
                 "ordering": "priority_then_created_at",
                 "resolution_outcomes": ["completed", "skipped"],
                 "active_status": "in_progress",
+                "claim_ownership": "only the same claimant may repeat a claim; other claimants are rejected",
                 "default_lease_seconds": DEFAULT_ACTION_LEASE_SECONDS,
                 "recovery": "stale in_progress actions can be reclaimed to open",
             },
@@ -652,7 +692,13 @@ class GeiterStore:
             ).isoformat()
             self._write(state)
             self.event("actions.claimed", action)
-        elif status not in {"in_progress", "completed", "skipped"}:
+        elif status == "in_progress":
+            owner = action["data"].get("claimed_by")
+            if owner != iteration_id:
+                raise ValueError(
+                    f"action {action_id} is already claimed by {owner or 'another agent'}"
+                )
+        elif status not in {"completed", "skipped"}:
             raise ValueError(f"invalid action status: {status}")
         return action
 

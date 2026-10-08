@@ -209,6 +209,9 @@ claims appear under `action list --status stale` and can be requeued with
 `action reclaim`; reclaiming is idempotent and never changes completed or skipped
 actions. A normal `iterate` cycle also reclaims expired work before selecting
 its next action.
+An active action claim is owner-specific: repeating a claim from the same
+iteration is idempotent, while another agent receives a claim conflict instead
+of being told it owns the work.
 
 Every batch run creates a durable run ledger. Provider exceptions are recorded
 per prompt, successful observations are preserved, and the batch finishes as

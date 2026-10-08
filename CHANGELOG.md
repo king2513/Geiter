@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.21.0 - 2026-10-08
+
+- made action claims owner-aware and rejected claims by competing agents
+- made `iterate` report claim conflicts rather than misrepresenting another agent's action as its own
+- documented the action ownership contract in capabilities and agent guidance
+
 ## 1.20.0 - 2026-10-08
 
 - made autonomous iteration prioritize unresolved failed regression gates

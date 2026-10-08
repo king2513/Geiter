@@ -82,8 +82,10 @@ report payloads expose both
 Claims carry a one-hour lease by default. `geiter_actions` accepts the virtual
 `stale` status, and `geiter_reclaim_action` requeues an expired claim to `open`.
 Reclaiming is idempotent, preserves the prior claim metadata, and refuses active
-leases. `geiter_iterate` also reclaims stale actions before claiming the next
-priority action.
+leases. An active claim is idempotent only for its original claimant; a
+different claimant receives an explicit conflict and cannot treat the action as
+its own. `geiter_iterate` also reclaims stale actions before claiming the next
+priority action, and records claim conflicts in its iteration result.
 It also exposes `geiter://status` and `geiter://report` resources through
 `resources/list` and `resources/read`.
 
