@@ -31,6 +31,12 @@ Geiter is an agent-native runtime for Generative Engine Optimization (GEO). It g
 - durable regression gate verdicts available after the original run response
 - policy-gated experiment proposals with explicit approval
 - experiment result ledger linking evidence, comparisons, and learnings
+- direction-safe north-star score with a weakest-dimension pointer
+- read-only self-introspection that ranks evidence-backed improvement opportunities
+- autonomous execute cycles that apply a change, verify it with the regression gate, and revert it when the evidence rejects it
+- a surface policy gate where anything but the sandbox defaults to requiring human approval
+- a durable approval workflow so governed changes wait for a named approver before touching a real surface
+- a compounding playbook that learns which change strategies actually improve the score
 - evidence-aware `iterate` cycles that consume comparisons and pending experiments
 - persistent prioritized agent action queue with evidence-backed completion
 - agent-proposed actions with deduplication and explicit priorities
@@ -53,6 +59,8 @@ python -m geiter prompt add "What is Geiter?" --intent discovery
 python -m geiter prompt list --json
 python -m geiter observe <prompt-id> --provider fixture --answer "Geiter is an agent-native GEO runtime." --citation https://example.com/geiter
 python -m geiter analyze --json
+python -m geiter score --json
+python -m geiter introspect --json
 python -m geiter health --json
 python -m geiter matrix --json
 python -m geiter doctor --json
@@ -63,6 +71,12 @@ python -m geiter baseline compare --json
 python -m geiter experiment propose --hypothesis "Improve citation rate" --change "Add authoritative docs" --json
 python -m geiter experiment result --id <experiment-id> --outcome supported --evidence "Citation rate improved" --json
 python -m geiter iterate --json
+python -m geiter execute --heading "Geiter: overview" --body "Geiter is an agent-native GEO runtime." --json
+python -m geiter govern propose --surface-id my-docs --heading "Overview" --body "..." --json
+python -m geiter govern approve <request-id> --approver alice --json
+python -m geiter govern reject <request-id> --approver alice --json
+python -m geiter govern list --json
+python -m geiter experience --json
 python -m geiter action propose --type investigate --prompt "Check the weakest citation cell" --priority high --json
 python -m geiter action list --json
 python -m geiter action list --status stale --json
@@ -137,7 +151,7 @@ printf '%s\n' \
   | python -m geiter gateway
 ```
 
-Tools include `geiter_status`, `geiter_context`, `geiter_add_prompt`, `geiter_record_observation`, `geiter_analyze`, `geiter_health`, `geiter_runs`, `geiter_report`, `geiter_resume`, `geiter_regression`, `geiter_matrix`, `geiter_save_baseline`, `geiter_compare`, `geiter_propose_experiment`, `geiter_record_experiment_result`, `geiter_iterate`, `geiter_actions`, `geiter_propose_action`, `geiter_complete_action`, `geiter_skip_action`, `geiter_reclaim_action`, `geiter_connect`, and `geiter_capabilities`. Resources include `geiter://status`, `geiter://context`, `geiter://report`, and `geiter://capabilities`.
+Tools include `geiter_status`, `geiter_context`, `geiter_add_prompt`, `geiter_record_observation`, `geiter_analyze`, `geiter_score`, `geiter_introspect`, `geiter_experience`, `geiter_execute`, `geiter_govern`, `geiter_approvals`, `geiter_health`, `geiter_runs`, `geiter_report`, `geiter_resume`, `geiter_regression`, `geiter_matrix`, `geiter_save_baseline`, `geiter_compare`, `geiter_propose_experiment`, `geiter_record_experiment_result`, `geiter_iterate`, `geiter_actions`, `geiter_propose_action`, `geiter_complete_action`, `geiter_skip_action`, `geiter_reclaim_action`, `geiter_connect`, and `geiter_capabilities`. Resources include `geiter://status`, `geiter://context`, `geiter://report`, `geiter://score`, `geiter://introspect`, `geiter://experience`, and `geiter://capabilities`.
 
 An agent can call `geiter_context` or read `geiter://context` once at startup
 to receive capabilities, workspace status, quality checks, queued work, and a
@@ -220,6 +234,85 @@ Pass `--max-attempts N` to retry only failed prompts up to `N` total attempts;
 successful prompts are never replayed. A run with remaining retryable prompts
 can be continued later with `resume <run-id>`; the provider and fixture are
 supplied again so the ledger remains portable and auditable.
+
+## Self-assessment
+
+Geiter can answer two questions an agent needs before choosing its next move:
+
+- `score` (`geiter/score-v1`) aggregates the retrieval signals into one
+  direction-safe north-star value between 0 and 100, together with per-dimension
+  detail and a `weakest_dimension` pointer. Higher is always better, so a rising
+  score means the knowledge surface is easier to discover and attribute. When the
+  usable sample is too small the score reports `insufficient_data` instead of
+  inventing a number.
+- `introspect` (`geiter/introspect-v1`) is read-only and ranks the most valuable
+  improvement opportunities by combining coverage gaps, observation health, and the
+  weakest coverage-matrix cells, each with the evidence that produced it.
+
+Both are read-only, are exposed through the CLI, the gateway, and MCP-style
+resources, and surface a bounded form in the agent bootstrap context.
+
+## Autonomous execution
+
+Geiter can act on its own knowledge instead of only measuring and proposing.
+`execute` runs one verified change cycle against a local sandbox surface:
+
+```text
+introspect -> propose change -> snapshot -> apply -> re-observe -> gate
+           -> accept (keep the change) or revert (roll it back)
+```
+
+The regression gate is the arbiter. A change is kept only when the evidence
+gate accepts it; if the gate rejects the change, the surface is restored from the
+snapshot taken before the change and the outcome is recorded as a learning. This
+means an agent may act autonomously while still being unable to keep an action
+that its own evidence rejects.
+
+The surface is a plain local directory (`.geiter/../sandbox`) and a
+surface-aware provider answers from its live content, so the gate judges the real
+effect of a change rather than a canned response. Nothing in this loop touches
+external or real content.
+
+## Change governance
+
+Autonomy needs a boundary. Every surface other than the trusted sandbox declares
+a policy that decides whether a change may be applied:
+
+| Level | Behavior |
+| --- | --- |
+| `auto` | Apply immediately, then let the regression gate accept or revert. |
+| `approve` | Create a durable approval request and wait for a named approver. This is the default for any undeclared surface. |
+| `deny` | Refuse the change without touching the surface. |
+
+A governed change persists as an approval request, so it survives across
+processes and can be approved or rejected by something other than the proposing
+agent:
+
+```bash
+python -m geiter govern propose --surface-id my-docs --heading "Overview" --body "..."
+python -m geiter govern approve <request-id> --approver alice
+python -m geiter govern list
+```
+
+Approval authorizes the **attempt**, never the **outcome**: an approved change
+still has to survive the regression gate, so no surface can be mutated by a
+change that the evidence rejects.
+
+## Compounding (the self-improvement flywheel)
+
+Every executed change already leaves an `execution.result` learning. The
+`experience` surface turns that log into a durable playbook: for each change
+kind it reports attempts, accept rate, and the average north-star delta. The
+execute cycle then prefers a kind that historically improved the score:
+
+```bash
+python -m geiter experience --json
+```
+
+A strategy only earns preference after a minimum number of samples, so a single
+lucky change cannot lock the loop into one approach, and a cold start falls back
+to the default deterministically. This is the compounding part of self-iteration:
+the more Geiter iterates, the better it gets at choosing what to try next.
 
 ## Design principles
 

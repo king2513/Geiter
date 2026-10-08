@@ -1,5 +1,44 @@
 # Changelog
 
+## 1.26.0 - 2026-10-08
+
+- added an effectiveness aggregator that turns past `execution.result` learnings into a durable playbook of which change kinds actually work
+- made the execute cycle choose its strategy from historical effectiveness, so a change kind that improved the score is preferred on later cycles
+- required a minimum sample before a strategy earns preference, so one lucky change cannot lock the loop into a single strategy
+- added the `experience` surface (`geiter/experience-v1`) with per-kind accept rate, mean score delta, and the recommended next strategy
+- exposed `experience` through the CLI, the `geiter_experience` gateway tool, and the `geiter://experience` resource, and surfaced a bounded form in `report` and the agent bootstrap context
+
+## 1.25.0 - 2026-10-08
+
+- added a surface policy gate with `auto`, `approve`, and `deny` levels; every surface other than the trusted sandbox defaults to requiring human approval
+- added a durable approval workflow where a governed change becomes a `pending_approval` request that persists across processes until a named approver approves or rejects it
+- made approval authorize only the attempt, never the outcome, because the regression gate still accepts or reverts the applied change
+- added `execute_governed` so autonomous execution can target a declared real surface without ever mutating it implicitly
+- exposed `govern propose|approve|reject|list` through the CLI and the `geiter_govern` and `geiter_approvals` gateway tools, and declared the `geiter/approvals-v1` contract in capabilities metadata
+
+## 1.24.0 - 2026-10-08
+
+- added autonomous execution: a propose/apply/verify cycle that lets Geiter act on its own knowledge surface instead of only measuring and proposing
+- added a local sandbox surface with per-change snapshots so any applied change is fully reversible
+- made the regression gate the arbiter: a change is kept only when the evidence gate accepts it, and is automatically reverted when it does not
+- added a surface-aware provider that answers from the live surface, so the gate judges a change's real effect rather than a canned response
+- exposed `execute` through the CLI and the `geiter_execute` gateway tool, and declared the `geiter/execution-v1` contract in capabilities metadata
+
+## 1.23.0 - 2026-10-08
+
+- added a reentrant cross-process file lock around every state-mutating operation to prevent lost updates when multiple agents share a workspace
+- used platform-native advisory locking (`fcntl.flock` / `msvcrt.locking`) with a sidecar `.geiter/state.lock` file, keeping the runtime dependency-free
+- made nested store calls safe so operations such as `iterate` -> `inspect` -> `add` re-enter the lock instead of deadlocking
+- added deterministic tests proving mutating methods hold the lock and that concurrent threads and processes never lose an update
+
+## 1.22.0 - 2026-10-08
+
+- added a direction-safe north-star score (`geiter/score-v1`) that aggregates mention, target citation, citation rank, and coverage into one 0-100 value with a `weakest_dimension`
+- added read-only self-introspection (`geiter/introspect-v1`) that ranks evidence-backed improvement opportunities from coverage, health, and matrix gaps
+- exposed `score` and `introspect` through the CLI, gateway tools, and resources
+- surfaced bounded self-assessment in `report` and the agent bootstrap context
+- declared the self-assessment contract in capabilities metadata
+
 ## 1.21.0 - 2026-10-08
 
 - made action claims owner-aware and rejected claims by competing agents

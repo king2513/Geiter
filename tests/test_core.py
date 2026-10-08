@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 
 import geiter
-from geiter.core import GeiterStore
+from geiter.core import FileLock, GeiterStore
 from geiter.gateway import dispatch
 from geiter.providers import (
     FixtureProvider,
@@ -16,6 +16,19 @@ from geiter.providers import (
     regression_run,
     resume_provider,
     run_provider,
+)
+from geiter.execute import (
+    SandboxSurface,
+    SurfacePolicy,
+    decide_approval,
+    effectiveness,
+    execute_cycle,
+    execute_governed,
+    experience,
+    list_approvals,
+    recommend_kind,
+    resolve_policy,
+    surface_provider_factory,
 )
 
 
@@ -33,6 +46,93 @@ class GeiterStoreTests(unittest.TestCase):
         self.assertEqual(first["schema"], "geiter/v1")
         self.assertEqual(second["created_at"], first["created_at"])
         self.assertTrue(self.store.state_path.exists())
+
+    def test_state_lock_serializes_concurrent_writes(self):
+        """Concurrent threads must not lose an update to the state file."""
+        import threading
+
+        self.store.init()
+        errors: list[Exception] = []
+
+        def worker(index: int) -> None:
+            try:
+                for item in range(20):
+                    self.store.add("memories", "fact", {"text": f"memory-{index}-{item}"})
+            except Exception as exc:  # pragma: no cover - surfaced via assert
+                errors.append(exc)
+
+        threads = [threading.Thread(target=worker, args=(i,)) for i in range(8)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        self.assertEqual(errors, [])
+        self.assertEqual(len(self.store.read()["memories"]), 8 * 20)
+
+    def test_mutating_methods_hold_the_state_lock(self):
+        """Every state-mutating method must run while the cross-process lock is held."""
+        self.store.init()
+        observed: list[int] = []
+        original_enter = FileLock.__enter__
+
+        def spy_enter(self_lock: FileLock) -> FileLock:
+            observed.append(self_lock._depth)
+            return original_enter(self_lock)
+
+        FileLock.__enter__ = spy_enter  # type: ignore[method-assign]
+        try:
+            self.store.add("memories", "fact", {"text": "a"})
+            self.store.add_prompt("What is Geiter?")
+            prompt = self.store.read()["prompts"][0]
+            self.store.record_observation(prompt["id"], "p", "Geiter", ["https://geiter.dev/x"])
+            self.store.iterate("hold the lock")
+        finally:
+            FileLock.__enter__ = original_enter  # type: ignore[method-assign]
+        # Each mutating call entered the lock; nested calls re-enter at greater depth.
+        self.assertGreaterEqual(len(observed), 8)
+        self.assertTrue(any(depth > 1 for depth in observed))
+
+    def test_state_lock_is_reentrant_for_nested_store_calls(self):
+        """Nested mutating calls (iterate -> inspect -> add) must not deadlock."""
+        self.store.init()
+        result = self.store.iterate("nested reentrancy check")
+        self.assertIsNotNone(result["id"])
+        # Re-entering an already-held lock is a no-op that must not raise.
+        with self.store.lock:
+            with self.store.lock:
+                self.assertGreater(self.store.lock._depth, 0)
+
+    def test_state_lock_serializes_concurrent_processes(self):
+        """Multiple OS processes writing the same workspace must not lose updates."""
+        import subprocess
+        import sys
+        import textwrap
+
+        self.store.init()
+        script = textwrap.dedent(
+            """
+            import sys
+            from geiter.core import GeiterStore
+            store = GeiterStore(sys.argv[1])
+            for index in range(10):
+                store.add("memories", "fact", {"text": f"proc-{sys.argv[2]}-{index}"})
+            """
+        )
+        project_root = str(Path(__file__).parent.parent)
+        procs = [
+            subprocess.Popen(
+                [sys.executable, "-c", script, self.tempdir.name, str(worker)],
+                cwd=project_root,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            for worker in range(4)
+        ]
+        for proc in procs:
+            _, err = proc.communicate(timeout=60)
+            self.assertEqual(proc.returncode, 0, err.decode("utf-8", "replace"))
+        # 4 processes x 10 adds each, with no lost updates.
+        self.assertEqual(len(self.store.read()["memories"]), 40)
 
     def test_iteration_leaves_a_complete_trace(self):
         self.store.init()
@@ -249,12 +349,359 @@ class GeiterStoreTests(unittest.TestCase):
         self.assertEqual(matrix["weakest_cells"][0]["provider"], "provider-b")
         self.assertEqual(matrix["weakest_cells"][0]["intent"], "evaluation")
 
+    def test_read_backfills_collections_for_older_workspaces(self):
+        """A workspace written before a collection existed must stay consistent."""
+        self.store.init()
+        # Simulate a legacy state file that predates the approvals collection.
+        state = self.store.read()
+        state.pop("approvals", None)
+        self.store._write(state)
+        reloaded = self.store.read()
+        self.assertIn("approvals", reloaded)
+        self.assertEqual(reloaded["approvals"], [])
+        self.assertTrue(self.store.doctor()["ok"])
+
+    def test_unknown_surface_policy_defaults_to_approve(self):
+        policy = resolve_policy("some-real-site")
+        self.assertEqual(policy.level, "approve")
+        self.assertEqual(policy.decide("append_section"), "approve")
+        # The sandbox is the only surface trusted to auto-apply.
+        self.assertEqual(resolve_policy("sandbox").level, "auto")
+        self.assertEqual(resolve_policy("sandbox").decide("append_section"), "auto")
+
+    def test_policy_levels_decide_changes(self):
+        self.assertEqual(
+            resolve_policy("x", {"level": "deny"}).decide("append_section"), "deny"
+        )
+        self.assertEqual(
+            resolve_policy("x", {"level": "auto"}).decide("append_section"), "auto"
+        )
+        # allowed_kinds restricts what an auto surface will touch.
+        policy = resolve_policy("x", {"level": "auto", "allowed_kinds": ["rewrite"]})
+        self.assertEqual(policy.decide("append_section"), "deny")
+        self.assertEqual(policy.decide("rewrite"), "auto")
+        with self.assertRaises(ValueError):
+            resolve_policy("x", {"level": "nonsense"})
+
+    def test_execute_governed_requires_approval_for_unknown_surface(self):
+        store = GeiterStore(self.tempdir.name)
+        store.init()
+        target = store.read()["identity"]["name"]
+        surface = SandboxSurface(self.tempdir.name)
+        surface.ensure()
+        before = surface.read()
+        result = execute_governed(
+            store,
+            "real-site",
+            "Real heading",
+            "Real body",
+            provider_factory=surface_provider_factory(surface, target),
+            target=target,
+        )
+        self.assertEqual(result["status"], "pending_approval")
+        # Nothing may be applied before approval.
+        self.assertEqual(surface.read(), before)
+        pending = list_approvals(store, "pending_approval")
+        self.assertEqual(len(pending), 1)
+        self.assertEqual(pending[0]["data"]["heading"], "Real heading")
+
+    def test_execute_governed_denies_when_policy_denies(self):
+        store = GeiterStore(self.tempdir.name)
+        store.init()
+        target = store.read()["identity"]["name"]
+        surface = SandboxSurface(self.tempdir.name)
+        surface.ensure()
+        result = execute_governed(
+            store,
+            "locked-site",
+            "H",
+            "B",
+            provider_factory=surface_provider_factory(surface, target),
+            declared_policy={"level": "deny"},
+            target=target,
+        )
+        self.assertEqual(result["status"], "denied")
+        self.assertNotIn("verdict", result)
+
+    def test_approved_request_executes_and_rejected_one_does_not(self):
+        store = GeiterStore(self.tempdir.name)
+        store.init()
+        target = store.read()["identity"]["name"]
+        store.add_prompt("What is Geiter?")
+        store.add_prompt("Why use Geiter?")
+        surface = SandboxSurface(self.tempdir.name)
+        surface.ensure()
+        factory = surface_provider_factory(surface, target)
+        # Propose -> pending.
+        proposal = execute_governed(
+            store, "site", "Geiter: approved", "Geiter is cited here.",
+            provider_factory=factory, target=target,
+        )
+        request_id = proposal["approval_request_id"]
+        # A rejected request must not execute.
+        execute_governed(
+            store, "site", "ignored", "ignored",
+            provider_factory=factory, request_id=request_id,
+        )
+        # Approve and execute using the stored request content.
+        decided = decide_approval(store, request_id, "approved", "human:alice")
+        self.assertEqual(decided["data"]["status"], "approved")
+        self.assertEqual(decided["data"]["approver"], "human:alice")
+        result = execute_governed(
+            store, "site", "ignored", "ignored",
+            provider_factory=factory, request_id=request_id, target=target,
+        )
+        self.assertEqual(result["status"], "executed")
+        self.assertEqual(result["proposal"]["edits"][0]["heading"], "Geiter: approved")
+
+    def test_decide_approval_validates_and_is_idempotent(self):
+        store = GeiterStore(self.tempdir.name)
+        store.init()
+        request = store.add(
+            "approvals", "change.approval_request",
+            {"status": "pending_approval", "surface_id": "s", "heading": "h", "body": "b"},
+        )
+        with self.assertRaises(ValueError):
+            decide_approval(store, request["id"], "approved", "")
+        with self.assertRaises(ValueError):
+            decide_approval(store, request["id"], "maybe", "alice")
+        with self.assertRaises(ValueError):
+            decide_approval(store, "nope", "approved", "alice")
+        first = decide_approval(store, request["id"], "approved", "alice")
+        second = decide_approval(store, request["id"], "approved", "bob")
+        self.assertEqual(first["data"]["approver"], "alice")
+        # Idempotent: the first decision stands.
+        self.assertEqual(second["data"]["approver"], "alice")
+
+    def test_effectiveness_is_empty_on_cold_start(self):
+        store = GeiterStore(self.tempdir.name)
+        store.init()
+        report = effectiveness(store)
+        self.assertEqual(report["schema"], "geiter/experience-v1")
+        self.assertEqual(report["total_executions"], 0)
+        self.assertEqual(report["strategies"], [])
+
+    def test_recommend_kind_falls_back_before_enough_history(self):
+        store = GeiterStore(self.tempdir.name)
+        store.init()
+        rec = recommend_kind(store)
+        self.assertEqual(rec["kind"], "append_section")
+        self.assertEqual(rec["reason"], "no_change_kind_has_enough_history_yet")
+        # A single attempt is not enough to earn preference.
+        store.add("learnings", "execution.result", {
+            "change_id": "c1", "kind": "cite_target", "accepted": True,
+            "verdict": {"accepted": True, "score_before": 10.0, "score_after": 20.0},
+        })
+        rec = recommend_kind(store)
+        self.assertEqual(rec["kind"], "append_section")
+
+    def test_effectiveness_prefers_the_strategy_that_improved(self):
+        store = GeiterStore(self.tempdir.name)
+        store.init()
+
+        def seed(kind: str, accepted: bool, before: float, after: float) -> None:
+            store.add("learnings", "execution.result", {
+                "change_id": f"c_{kind}_{before}_{after}", "kind": kind,
+                "accepted": accepted, "evidence": {"weakest_dimension": "target_citation"},
+                "verdict": {"accepted": accepted, "score_before": before, "score_after": after},
+            })
+
+        # bad strategy: half reverted, and the accepted one actually regressed.
+        seed("bad_kind", True, 40.0, 38.0)
+        seed("bad_kind", False, 40.0, 40.0)
+        # good strategy: consistently improved.
+        seed("good_kind", True, 40.0, 55.0)
+        seed("good_kind", True, 55.0, 70.0)
+
+        report = effectiveness(store)
+        self.assertEqual(report["total_executions"], 4)
+        by_kind = {item["kind"]: item for item in report["strategies"]}
+        self.assertEqual(by_kind["good_kind"]["accept_rate"], 1.0)
+        self.assertEqual(by_kind["good_kind"]["mean_score_delta"], 15.0)
+        self.assertEqual(by_kind["good_kind"]["improved_count"], 2)
+        self.assertEqual(by_kind["good_kind"]["regressed_count"], 0)
+        self.assertEqual(by_kind["bad_kind"]["regressed_count"], 1)
+        # It prefers the strategy that actually improved the score.
+        self.assertEqual(recommend_kind(store)["kind"], "good_kind")
+        # And the strategies are ranked best-first.
+        self.assertEqual(report["strategies"][0]["kind"], "good_kind")
+
+    def test_experience_playbook_surface(self):
+        store = GeiterStore(self.tempdir.name)
+        store.init()
+        store.add("learnings", "execution.result", {
+            "change_id": "c1", "kind": "cite_target", "accepted": True,
+            "verdict": {"accepted": True, "score_before": 10.0, "score_after": 30.0},
+        })
+        store.add("learnings", "execution.result", {
+            "change_id": "c2", "kind": "cite_target", "accepted": True,
+            "verdict": {"accepted": True, "score_before": 30.0, "score_after": 50.0},
+        })
+        report = experience(store)
+        self.assertEqual(report["schema"], "geiter/experience-v1")
+        self.assertEqual(report["total_executions"], 2)
+        self.assertEqual(report["recommendation"]["kind"], "cite_target")
+        # The bounded form is exposed through report and context without mutation.
+        bounded = store.report()["experience"]
+        self.assertEqual(bounded["total_executions"], 2)
+        self.assertEqual(bounded["top_strategy"]["kind"], "cite_target")
+        self.assertEqual(store.context()["self_assessment"]["experience"]["total_executions"], 2)
+
+    def test_execute_cycle_uses_learned_strategy_by_default(self):
+        store = GeiterStore(self.tempdir.name)
+        store.init()
+        target = store.read()["identity"]["name"]
+        store.add_prompt("What is Geiter?")
+        store.add_prompt("Why use Geiter?")
+        surface = SandboxSurface(self.tempdir.name)
+        surface.ensure()
+        # Seed a winning strategy so recommendation is eligible.
+        for index, (before, after) in enumerate([(10.0, 20.0), (20.0, 30.0)]):
+            store.add("learnings", "execution.result", {
+                "change_id": f"seed-{index}", "kind": "cite_target", "accepted": True,
+                "verdict": {"accepted": True, "score_before": before, "score_after": after},
+            })
+        result = execute_cycle(
+            store,
+            "Learned",
+            f"{target} is documented and cited.",
+            provider_factory=surface_provider_factory(surface, target),
+            target=target,
+        )
+        # It should have chosen the historically better kind, not the default.
+        self.assertEqual(result["strategy"]["kind"], "cite_target")
+        self.assertEqual(result["proposal"]["kind"], "cite_target")
+        # An explicit kind overrides the recommendation.
+        explicit = execute_cycle(
+            store,
+            "Explicit",
+            f"{target} is documented and cited.",
+            provider_factory=surface_provider_factory(surface, target),
+            target=target,
+            kind="append_section",
+        )
+        self.assertEqual(explicit["proposal"]["kind"], "append_section")
+
+    def test_sandbox_surface_apply_and_revert(self):
+        surface = SandboxSurface(self.tempdir.name)
+        info = surface.ensure()
+        self.assertTrue(info["created"])
+        before = surface.read()
+        snapshot = surface.snapshot("chg_test")
+        surface.append_section("Geiter: overview", "Geiter is a runtime.")
+        self.assertIn("Geiter: overview", surface.read())
+        revert = surface.revert("chg_test")
+        self.assertTrue(revert["reverted"])
+        self.assertEqual(surface.read(), before)
+        self.assertTrue(snapshot.exists())
+
+    def test_execute_cycle_accepts_a_change_the_gate_approves(self):
+        store = GeiterStore(self.tempdir.name)
+        store.init()
+        target = store.read()["identity"]["name"]
+        store.add_prompt("What is Geiter?", "discovery")
+        store.add_prompt("Why use Geiter?", "evaluation")
+        surface = SandboxSurface(self.tempdir.name)
+        surface.ensure()
+        result = execute_cycle(
+            store,
+            heading=f"{target}: overview",
+            body=f"{target} is an agent-native GEO runtime that is cited.",
+            provider_factory=surface_provider_factory(surface, target),
+            target=target,
+        )
+        self.assertEqual(result["schema"], "geiter/execution-v1")
+        self.assertTrue(result["verdict"]["accepted"], result["verdict"])
+        self.assertTrue(result["gate"]["ok"])
+        self.assertIn("Geiter: overview", surface.read())
+
+    def test_execute_cycle_reverts_a_change_the_gate_rejects(self):
+        store = GeiterStore(self.tempdir.name)
+        store.init()
+        target = store.read()["identity"]["name"]
+        surface = SandboxSurface(self.tempdir.name)
+        surface.ensure()
+        before = surface.read()
+        result = execute_cycle(
+            store,
+            heading=f"{target}: rejected",
+            body="This change must be reverted because the gate fails with no prompts.",
+            provider_factory=surface_provider_factory(surface, target),
+            target=target,
+        )
+        self.assertFalse(result["verdict"]["accepted"])
+        self.assertFalse(result["gate"]["ok"])
+        self.assertIn("prompts_present", result["verdict"]["gate_failed_checks"])
+        self.assertTrue(result["verdict"]["revert"]["reverted"])
+        self.assertEqual(surface.read(), before)
+
+    def test_execute_cycle_records_an_execution_learning(self):
+        store = GeiterStore(self.tempdir.name)
+        store.init()
+        target = store.read()["identity"]["name"]
+        store.add_prompt("What is Geiter?")
+        surface = SandboxSurface(self.tempdir.name)
+        surface.ensure()
+        result = execute_cycle(
+            store,
+            heading=f"{target}: note",
+            body=f"{target} is referenced and cited for this note.",
+            provider_factory=surface_provider_factory(surface, target),
+            target=target,
+        )
+        learnings = [
+            item for item in store.read()["learnings"]
+            if item["kind"] == "execution.result"
+        ]
+        self.assertEqual(len(learnings), 1)
+        self.assertEqual(learnings[0]["data"]["change_id"], result["verdict"]["change_id"])
+
     def test_prompt_identity_is_deterministic_and_deduplicated(self):
         self.store.init()
         first = self.store.add_prompt("  What is   Geiter? ")
         second = self.store.add_prompt("what is geiter?")
         self.assertEqual(first["id"], second["id"])
         self.assertEqual(len(self.store.read()["prompts"]), 1)
+
+    def test_score_reports_insufficient_data_on_empty_workspace(self):
+        self.store.init()
+        score = self.store.score()
+        self.assertEqual(score["schema"], "geiter/score-v1")
+        self.assertEqual(score["status"], "insufficient_data")
+        self.assertIsNone(score["north_star"])
+        self.assertIsNone(score["weakest_dimension"])
+
+    def test_score_is_direction_safe_and_finds_weakest_dimension(self):
+        self.store.init()
+        prompt_a = self.store.add_prompt("What is Geiter?", "discovery")
+        prompt_b = self.store.add_prompt("Why use Geiter?", "evaluation")
+        # Both mention the target and attribute a citation to it.
+        self.store.record_observation(prompt_a["id"], "provider-a", "Geiter is great.", ["https://geiter.dev/docs"])
+        self.store.record_observation(prompt_b["id"], "provider-a", "Geiter helps.", ["https://geiter.dev/why"])
+        strong = self.store.score()
+        self.assertEqual(strong["status"], "scored")
+        self.assertGreater(strong["north_star"], 0)
+        # A mentioned-but-never-cited observation should drag the score down.
+        self.store.record_observation(prompt_b["id"], "provider-b", "Geiter again.", [])
+        weak = self.store.score()
+        self.assertLess(weak["north_star"], strong["north_star"])
+        self.assertEqual(weak["weakest_dimension"], "target_citation")
+
+    def test_introspect_ranks_evidence_backed_opportunities(self):
+        self.store.init()
+        prompt_a = self.store.add_prompt("What is Geiter?", "discovery")
+        self.store.record_observation(prompt_a["id"], "provider-a", "Geiter is great.", ["https://geiter.dev/docs"])
+        unobserved = self.store.add_prompt("Never observed prompt?", "discovery")
+        result = self.store.introspect()
+        self.assertEqual(result["schema"], "geiter/introspect-v1")
+        self.assertEqual(result["status"], "actionable")
+        opportunities = {item["opportunity"]: item for item in result["opportunities"]}
+        self.assertIn("observe_uncovered_prompts", opportunities)
+        self.assertIn(
+            unobserved["id"],
+            opportunities["observe_uncovered_prompts"]["evidence"]["unobserved_prompt_ids"],
+        )
+        self.assertEqual(result["opportunities"][0]["priority"], "high")
 
     def test_observation_metrics_and_analysis(self):
         self.store.init()
@@ -899,13 +1346,104 @@ class GeiterStoreTests(unittest.TestCase):
         uris = {item["uri"] for item in listed["result"]["content"][0]["json"]["resources"]}
         self.assertEqual(
             uris,
-            {"geiter://status", "geiter://context", "geiter://report", "geiter://capabilities"},
+            {
+                "geiter://status",
+                "geiter://context",
+                "geiter://report",
+                "geiter://capabilities",
+                "geiter://score",
+                "geiter://introspect",
+                "geiter://experience",
+            },
         )
         read = dispatch(self.store, {
             "jsonrpc": "2.0", "id": 5, "method": "resources/read",
             "params": {"uri": "geiter://status"},
         })
         self.assertEqual(read["result"]["content"][0]["json"]["contents"][0]["uri"], "geiter://status")
+
+    def test_gateway_exposes_self_assessment_surfaces(self):
+        self.store.init()
+        listed = dispatch(self.store, {"jsonrpc": "2.0", "id": 40, "method": "tools/list"})
+        names = {tool["name"] for tool in listed["result"]["content"][0]["json"]["tools"]}
+        self.assertIn("geiter_score", names)
+        self.assertIn("geiter_introspect", names)
+        self.assertIn("geiter_execute", names)
+        score = dispatch(self.store, {
+            "jsonrpc": "2.0", "id": 41, "method": "tools/call",
+            "params": {"name": "geiter_score", "arguments": {}},
+        })
+        self.assertEqual(
+            score["result"]["content"][0]["json"]["schema"], "geiter/score-v1"
+        )
+        introspect = dispatch(self.store, {
+            "jsonrpc": "2.0", "id": 42, "method": "tools/call",
+            "params": {"name": "geiter_introspect", "arguments": {}},
+        })
+        self.assertEqual(
+            introspect["result"]["content"][0]["json"]["schema"], "geiter/introspect-v1"
+        )
+        read = dispatch(self.store, {
+            "jsonrpc": "2.0", "id": 43, "method": "resources/read",
+            "params": {"uri": "geiter://score"},
+        })
+        self.assertEqual(read["result"]["content"][0]["json"]["contents"][0]["uri"], "geiter://score")
+
+    def test_gateway_execute_runs_a_verified_cycle(self):
+        self.store.init()
+        self.store.add_prompt("What is Geiter?")
+        target = self.store.read()["identity"]["name"]
+        response = dispatch(self.store, {
+            "jsonrpc": "2.0", "id": 50, "method": "tools/call",
+            "params": {
+                "name": "geiter_execute",
+                "arguments": {
+                    "heading": f"{target}: gateway",
+                    "body": f"{target} is cited for this gateway exercise.",
+                },
+            },
+        })
+        payload = response["result"]["content"][0]["json"]
+        self.assertEqual(payload["schema"], "geiter/execution-v1")
+        self.assertIn("verdict", payload)
+        self.assertIn("change_id", payload["verdict"])
+
+    def test_gateway_govern_and_approvals(self):
+        self.store.init()
+        listed = dispatch(self.store, {"jsonrpc": "2.0", "id": 60, "method": "tools/list"})
+        names = {tool["name"] for tool in listed["result"]["content"][0]["json"]["tools"]}
+        self.assertIn("geiter_govern", names)
+        self.assertIn("geiter_approvals", names)
+        # An undeclared surface must not auto-execute.
+        proposed = dispatch(self.store, {
+            "jsonrpc": "2.0", "id": 61, "method": "tools/call",
+            "params": {
+                "name": "geiter_govern",
+                "arguments": {
+                    "surface_id": "real-site",
+                    "heading": "Gateway heading",
+                    "body": "Gateway body",
+                },
+            },
+        })
+        payload = proposed["result"]["content"][0]["json"]
+        self.assertEqual(payload["status"], "pending_approval")
+        request_id = payload["approval_request_id"]
+        # Approve it through the gateway.
+        approved = dispatch(self.store, {
+            "jsonrpc": "2.0", "id": 62, "method": "tools/call",
+            "params": {
+                "name": "geiter_approvals",
+                "arguments": {
+                    "operation": "approve",
+                    "request_id": request_id,
+                    "approver": "human:tester",
+                },
+            },
+        })
+        self.assertEqual(
+            approved["result"]["content"][0]["json"]["data"]["status"], "approved"
+        )
 
     def test_gateway_exposes_experiment_tools(self):
         self.store.init()

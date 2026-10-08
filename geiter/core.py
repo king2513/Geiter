@@ -4,6 +4,8 @@ import json
 import hashlib
 import time
 import uuid
+import functools
+import threading
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -14,6 +16,116 @@ from . import __version__
 
 
 DEFAULT_ACTION_LEASE_SECONDS = 3600
+
+try:  # pragma: no cover - platform import guard
+    import fcntl  # type: ignore
+except ImportError:  # pragma: no cover - Windows fallback
+    fcntl = None  # type: ignore
+
+try:  # pragma: no cover - platform import guard
+    import msvcrt  # type: ignore
+except ImportError:  # pragma: no cover - POSIX fallback
+    msvcrt = None  # type: ignore
+
+
+class FileLock:
+    """A reentrant, cross-process advisory lock backed by a sidecar lock file.
+
+    The lock protects the read-modify-write cycle around ``state.json`` so two
+    agents (or two processes) cannot interleave and lose an update. It uses
+    ``msvcrt.locking`` on Windows and ``fcntl.flock`` elsewhere, writing to a
+    dedicated ``.geiter/state.lock`` file so the state file itself is never
+    held open across the critical section.
+
+    Reentrancy is tracked with thread-local state, not instance-wide state, so
+    two threads sharing one store still contend for the real file lock while a
+    single thread can safely nest calls such as ``iterate`` -> ``inspect`` ->
+    ``add``.
+    """
+
+    def __init__(self, path: Path, timeout: float = 10.0, poll_interval: float = 0.01):
+        self.path = path
+        self.timeout = timeout
+        self.poll_interval = poll_interval
+        self._local = threading.local()
+
+    @property
+    def _depth(self) -> int:
+        return getattr(self._local, "depth", 0)
+
+    @_depth.setter
+    def _depth(self, value: int) -> None:
+        self._local.depth = value
+
+    @property
+    def _handle(self) -> Any:
+        return getattr(self._local, "handle", None)
+
+    @_handle.setter
+    def _handle(self, value: Any) -> None:
+        self._local.handle = value
+
+    def _acquire_file(self, handle: Any) -> None:
+        if fcntl is not None:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        elif msvcrt is not None:  # pragma: no cover - Windows path
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+
+    def _release_file(self, handle: Any) -> None:
+        if fcntl is not None:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        elif msvcrt is not None:  # pragma: no cover - Windows path
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+
+    def __enter__(self) -> FileLock:
+        if self._depth > 0:
+            self._depth += 1
+            return self
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        deadline = time.monotonic() + self.timeout
+        handle = open(self.path, "a+b")
+        while True:
+            try:
+                self._acquire_file(handle)
+                break
+            except OSError:
+                if time.monotonic() >= deadline:
+                    handle.close()
+                    raise TimeoutError(f"could not acquire geiter state lock: {self.path}")
+                time.sleep(self.poll_interval)
+        self._handle = handle  # type: ignore[misc]
+        self._depth = 1
+        return self
+
+    def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
+        if self._depth == 0:
+            return
+        self._depth -= 1
+        if self._depth == 0:
+            handle = self._handle
+            if handle is not None:
+                try:
+                    self._release_file(handle)
+                finally:
+                    handle.close()
+                    self._handle = None
+
+
+def synchronized(method: Any) -> Any:
+    """Serialize a mutating store method across processes.
+
+    The wrapped method runs while holding the store's state lock, so a full
+    read-modify-write cycle is atomic with respect to other processes.
+    """
+
+    @functools.wraps(method)
+    def wrapper(self: GeiterStore, *args: Any, **kwargs: Any) -> Any:
+        with self.lock:
+            return method(self, *args, **kwargs)
+
+    return wrapper
 
 
 def now() -> str:
@@ -38,15 +150,18 @@ class Record:
 class GeiterStore:
     """Durable JSON store with an append-only event log."""
 
-    def __init__(self, root: str | Path = "."):
+    def __init__(self, root: str | Path = ".", lock_timeout: float = 10.0):
         self.root = Path(root).resolve()
         self.geiter_dir = self.root / ".geiter"
         self.state_path = self.geiter_dir / "state.json"
         self.events_path = self.geiter_dir / "events.jsonl"
+        self.lock_path = self.geiter_dir / "state.lock"
+        self.lock = FileLock(self.lock_path, timeout=lock_timeout)
 
     def exists(self) -> bool:
         return self.state_path.exists()
 
+    @synchronized
     def init(self) -> dict[str, Any]:
         self.geiter_dir.mkdir(parents=True, exist_ok=True)
         if not self.exists():
@@ -71,6 +186,7 @@ class GeiterStore:
                 "baselines": [],
                 "experiments": [],
                 "runs": [],
+                "approvals": [],
             }
             self._write(state)
             self.event("workspace.initialized", {"schema": state["schema"]})
@@ -79,7 +195,25 @@ class GeiterStore:
     def read(self) -> dict[str, Any]:
         if not self.exists():
             return self.init()
-        return json.loads(self.state_path.read_text(encoding="utf-8"))
+        state = json.loads(self.state_path.read_text(encoding="utf-8"))
+        if self._backfill_collections(state):
+            self._write(state)
+        return state
+
+    @staticmethod
+    def _backfill_collections(state: dict[str, Any]) -> bool:
+        """Add collections introduced by newer versions to an existing state.
+
+        Older workspaces predate collections such as ``approvals``. Backfilling
+        them on read keeps ``doctor`` meaningful and stops a version upgrade
+        from making every gate fail with a false consistency error.
+        """
+        added = False
+        for key in ("approvals",):
+            if key not in state:
+                state[key] = []
+                added = True
+        return added
 
     def _write(self, state: dict[str, Any]) -> None:
         state["updated_at"] = now()
@@ -94,6 +228,7 @@ class GeiterStore:
             handle.write(json.dumps(event, ensure_ascii=False) + "\n")
         return event
 
+    @synchronized
     def add(self, collection: str, kind: str, data: dict[str, Any]) -> dict[str, Any]:
         state = self.read()
         record = Record(uid(kind[:3]), now(), kind, data).to_dict()
@@ -108,6 +243,7 @@ class GeiterStore:
     def prompts(self) -> list[dict[str, Any]]:
         return self.list_records("prompts")
 
+    @synchronized
     def inspect(self) -> dict[str, Any]:
         state = self.read()
         files = [
@@ -131,6 +267,7 @@ class GeiterStore:
             },
         )
 
+    @synchronized
     def iterate(self, hypothesis: str | None = None) -> dict[str, Any]:
         recovered_actions = self.recover_stale_actions()
         state = self.read()
@@ -352,6 +489,7 @@ class GeiterStore:
         self.event("runs.started", run)
         return run
 
+    @synchronized
     def record_run_attempt(
         self,
         run_id: str,
@@ -383,6 +521,7 @@ class GeiterStore:
         self.event("runs.attempted", {"run_id": run_id, **attempt})
         return attempt
 
+    @synchronized
     def finish_run(self, run_id: str) -> dict[str, Any]:
         state = self.read()
         run = next((item for item in state.get("runs", []) if item["id"] == run_id), None)
@@ -458,6 +597,8 @@ class GeiterStore:
             "state_schema": "geiter/v1",
             "report_schemas": [
                 "geiter/analysis-v1",
+                "geiter/score-v1",
+                "geiter/introspect-v1",
                 "geiter/health-v1",
                 "geiter/matrix-v1",
                 "geiter/comparison-v1",
@@ -482,6 +623,8 @@ class GeiterStore:
                 "resume": "python -m geiter resume <run-id> --provider <name> [provider options] --json",
                 "iteration": "python -m geiter iterate --json",
                 "context": "python -m geiter context --json",
+                "score": "python -m geiter score --json",
+                "introspect": "python -m geiter introspect --json",
                 "actions": "python -m geiter action list --json",
                 "propose_action": "python -m geiter action propose --type <type> --prompt <text> --json",
             },
@@ -507,6 +650,50 @@ class GeiterStore:
                 "persisted_on": "runs[].data.gate",
                 "latest_report_field": "latest_gate",
             },
+            "self_assessment": {
+                "score_schema": "geiter/score-v1",
+                "introspect_schema": "geiter/introspect-v1",
+                "experience_schema": "geiter/experience-v1",
+                "score_range": [0, 100],
+                "score_direction": "higher_is_better",
+                "score_statuses": ["scored", "insufficient_data"],
+                "insufficient_data_rule": (
+                    "fewer than the minimum usable sample produces no north_star value"
+                ),
+                "dimensions": ["mention", "target_citation", "citation_rank", "coverage"],
+                "introspect_statuses": ["actionable", "healthy"],
+                "read_only": True,
+            },
+            "autonomous_execution": {
+                "schema": "geiter/execution-v1",
+                "surface": "local sandbox directory (.geiter/../sandbox)",
+                "cycle": ["propose", "snapshot", "apply", "re-observe", "gate", "accept_or_revert"],
+                "arbiter": "regression gate",
+                "on_gate_failure": "revert the surface to its pre-change snapshot",
+                "safety": (
+                    "edits only a local sandbox surface, never external or real content; "
+                    "a change is kept only when the evidence gate accepts it"
+                ),
+                "entrypoint": "python -m geiter execute --heading <heading> --body <body> --json",
+            },
+            "change_governance": {
+                "schema": "geiter/approvals-v1",
+                "policy_levels": ["auto", "approve", "deny"],
+                "default_for_unknown_surfaces": "approve",
+                "trusted_surface": "sandbox",
+                "approval_states": ["pending_approval", "approved", "rejected"],
+                "guarantee": (
+                    "a surface other than the sandbox is never mutated without an explicit "
+                    "policy decision; approval authorizes the attempt, never the outcome, "
+                    "because the regression gate still arbitrates"
+                ),
+                "entrypoints": {
+                    "propose": "python -m geiter govern propose --surface-id <id> --heading <h> --body <b> --json",
+                    "approve": "python -m geiter govern approve <request-id> --approver <who> --json",
+                    "reject": "python -m geiter govern reject <request-id> --approver <who> --json",
+                    "list": "python -m geiter govern list --json",
+                },
+            },
             "action_queue": {
                 "record_kind": "agent.action",
                 "statuses": ["open", "in_progress", "completed", "skipped"],
@@ -526,7 +713,14 @@ class GeiterStore:
                 "replay-before-reach",
                 "agent-first",
                 "external-effects-require-policy",
+                "concurrent-writes-are-serialized",
             ],
+            "concurrency": {
+                "state_lock": ".geiter/state.lock",
+                "mechanism": "reentrant advisory lock (fcntl.flock / msvcrt.locking)",
+                "guarantee": "state read-modify-write cycles are atomic across processes",
+                "on_contention": "raise TimeoutError instead of corrupting state",
+            },
         }
 
     def status(self) -> dict[str, Any]:
@@ -583,10 +777,18 @@ class GeiterStore:
                 "health": report["health"],
                 "doctor": report["doctor"],
             },
+            "self_assessment": {
+                "score": report["score"]["status"],
+                "north_star": report["score"]["north_star"],
+                "weakest_dimension": report["score"]["weakest_dimension"],
+                "next_opportunity": report["introspect"]["next_action"],
+                "experience": report["experience"],
+            },
             "latest_iteration": latest_iteration,
             "latest_learning": latest_learning,
         }
 
+    @synchronized
     def propose_action(
         self,
         action_type: str,
@@ -668,6 +870,7 @@ class GeiterStore:
             seconds=data.get("claim_lease_seconds", DEFAULT_ACTION_LEASE_SECONDS)
         )
 
+    @synchronized
     def claim_action(
         self,
         action_id: str,
@@ -705,6 +908,7 @@ class GeiterStore:
     def stale_actions(self, at: str | None = None) -> list[dict[str, Any]]:
         return self.list_actions("in_progress", stale_only=True, at=at)
 
+    @synchronized
     def reclaim_action(
         self,
         action_id: str,
@@ -756,6 +960,7 @@ class GeiterStore:
             return None
         return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
 
+    @synchronized
     def resolve_action(
         self,
         action_id: str,
@@ -1010,6 +1215,7 @@ class GeiterStore:
         run["data"]["gate"] = persisted_gate
         return gate
 
+    @synchronized
     def add_prompt(self, text: str, intent: str | None = None) -> dict[str, Any]:
         normalized = " ".join(text.split())
         if not normalized:
@@ -1030,6 +1236,7 @@ class GeiterStore:
         self.event("prompts.added", record)
         return record
 
+    @synchronized
     def record_observation(
         self,
         prompt_id: str,
@@ -1139,6 +1346,172 @@ class GeiterStore:
             if item["kind"] == "retrieval.observation" and item["data"].get("quality", {}).get("usable", True)
         ]
         return self._analyze_observations(state, observations)
+
+    def score(self) -> dict[str, Any]:
+        """Aggregate retrieval metrics into one direction-safe north-star score.
+
+        Every dimension is normalized so that higher is always better, so a rising
+        score always means the knowledge surface is easier to discover and cite.
+        Dimensions with too few samples to be meaningful are reported as
+        ``insufficient_data`` instead of being folded into a misleading total.
+        """
+        analysis = self.analyze()
+        metrics = analysis["metrics"]
+        coverage = analysis["coverage"]
+        sample_size = metrics["sample_size"]
+        minimum_sample = 2
+        dimensions = [
+            {
+                "name": "mention",
+                "value": metrics["mention_rate"],
+                "weight": 0.25,
+                "sample_size": sample_size,
+                "description": "How often providers mention the target by name.",
+            },
+            {
+                "name": "target_citation",
+                "value": metrics["target_citation_rate"],
+                "weight": 0.35,
+                "sample_size": sample_size,
+                "description": "How often providers attribute a citation to the target; the strongest trust signal.",
+            },
+            {
+                "name": "citation_rank",
+                "value": metrics["mean_citation_reciprocal_rank"],
+                "weight": 0.20,
+                "sample_size": sample_size,
+                "description": "Direction-safe citation rank quality (1 / position).",
+            },
+            {
+                "name": "coverage",
+                "value": (
+                    round(
+                        coverage["observed_prompts"] / coverage["prompts"], 4
+                    )
+                    if coverage["prompts"]
+                    else None
+                ),
+                "weight": 0.20,
+                "sample_size": coverage["prompts"],
+                "description": "Share of configured prompts that have at least one usable observation.",
+            },
+        ]
+        scored = [item for item in dimensions if item["value"] is not None]
+        total_weight = sum(item["weight"] for item in scored)
+        sufficient = sample_size >= minimum_sample
+        if not scored or not sufficient or total_weight == 0:
+            north_star = None
+        else:
+            north_star = round(
+                sum(item["value"] * item["weight"] for item in scored) / total_weight * 100,
+                2,
+            )
+        ranked = sorted(scored, key=lambda item: (item["value"], -item["weight"]))
+        weakest_dimension = ranked[0]["name"] if ranked else None
+        return {
+            "schema": "geiter/score-v1",
+            "generated_at": now(),
+            "status": "scored" if north_star is not None else "insufficient_data",
+            "north_star": north_star,
+            "minimum_sample": minimum_sample,
+            "sample_size": sample_size,
+            "dimensions": dimensions,
+            "weakest_dimension": weakest_dimension,
+            "next_action": (
+                f"Improve the weakest dimension '{weakest_dimension}' before expanding coverage."
+                if weakest_dimension and sufficient
+                else "Collect more usable observations before trusting a north-star score."
+            ),
+        }
+
+    def introspect(self) -> dict[str, Any]:
+        """Answer "what should I improve first?" from coverage, health, and score.
+
+        The result is a ranked list of evidence-backed improvement opportunities so
+        an agent can pick the smallest highest-value change instead of guessing.
+        This method is read-only: it never mutates workspace state.
+        """
+        state = self.read()
+        score = self.score()
+        analysis = self.analyze()
+        health = self.health()
+        matrix = self.analyze_matrix()
+        opportunities: list[dict[str, Any]] = []
+
+        unobserved = analysis["coverage"]["unobserved_prompt_ids"]
+        if unobserved:
+            opportunities.append({
+                "opportunity": "observe_uncovered_prompts",
+                "priority": "high",
+                "evidence": {"unobserved_prompt_ids": unobserved},
+                "detail": (
+                    f"{len(unobserved)} configured prompts have never been observed; "
+                    "their retrieval behavior is unknown."
+                ),
+            })
+
+        if health["unusable_count"]:
+            opportunities.append({
+                "opportunity": "repair_unusable_observations",
+                "priority": "high",
+                "evidence": {"unusable_count": health["unusable_count"]},
+                "detail": (
+                    f"{health['unusable_count']} observations are unusable and excluded from "
+                    "aggregates; repair them before trusting the score."
+                ),
+            })
+
+        for cell in matrix["weakest_cells"]:
+            cell_metrics = cell["analysis"]["metrics"]
+            if cell_metrics["target_citation_rate"] == 0 and cell_metrics["sample_size"]:
+                opportunities.append({
+                    "opportunity": "strengthen_attribution",
+                    "priority": "normal",
+                    "evidence": {
+                        "provider": cell["provider"],
+                        "intent": cell["intent"],
+                        "target_citation_rate": cell_metrics["target_citation_rate"],
+                    },
+                    "detail": (
+                        f"Cell {cell['provider']}::{cell['intent']} is mentioned but never "
+                        "attributed a citation; strengthen attributable source material."
+                    ),
+                })
+
+        if not health["providers"]:
+            opportunities.append({
+                "opportunity": "connect_provider",
+                "priority": "critical",
+                "evidence": {"provider_count": 0},
+                "detail": "No provider observations exist yet; add prompts and record a first batch.",
+            })
+
+        if score.get("weakest_dimension") and score.get("status") == "scored":
+            opportunities.append({
+                "opportunity": "improve_weakest_dimension",
+                "priority": "normal",
+                "evidence": {"weakest_dimension": score["weakest_dimension"]},
+                "detail": score["next_action"],
+            })
+
+        rank = {"critical": 0, "high": 1, "normal": 2}
+        opportunities.sort(key=lambda item: rank.get(item["priority"], 9))
+        return {
+            "schema": "geiter/introspect-v1",
+            "generated_at": now(),
+            "status": "actionable" if opportunities else "healthy",
+            "opportunity_count": len(opportunities),
+            "opportunities": opportunities,
+            "score": {
+                "status": score["status"],
+                "north_star": score["north_star"],
+                "weakest_dimension": score["weakest_dimension"],
+            },
+            "next_action": (
+                opportunities[0]["detail"] if opportunities
+                else "No structural gaps detected; expand prompt and provider coverage."
+            ),
+        }
 
     def health(self) -> dict[str, Any]:
         state = self.read()
@@ -1361,6 +1734,7 @@ class GeiterStore:
             "next_action": GeiterStore._recommendation(metrics, count),
         }
 
+    @synchronized
     def propose_experiment(self, hypothesis: str, change: str, risk: str = "low") -> dict[str, Any]:
         if not hypothesis.strip() or not change.strip():
             raise ValueError("experiment hypothesis and change are required")
@@ -1379,6 +1753,7 @@ class GeiterStore:
         self.event("experiments.proposed", experiment)
         return experiment
 
+    @synchronized
     def approve_experiment(self, experiment_id: str) -> dict[str, Any]:
         state = self.read()
         experiment = next((item for item in state.get("experiments", []) if item["id"] == experiment_id), None)
@@ -1392,6 +1767,7 @@ class GeiterStore:
         self.event("experiments.approved", experiment)
         return experiment
 
+    @synchronized
     def record_experiment_result(
         self,
         experiment_id: str,
@@ -1470,6 +1846,7 @@ class GeiterStore:
         required = {
             "identity", "goals", "memories", "prompts", "observations",
             "hypotheses", "actions", "measurements", "learnings", "iterations",
+            "approvals",
         }
         missing = sorted(required.difference(state))
         check("collections", not missing, f"missing={missing}" if missing else "all required collections present")
@@ -1507,7 +1884,9 @@ class GeiterStore:
             "goals": state["goals"],
             "memory_count": len(state["memories"]),
             "analysis": analysis,
-            "matrix": self.analyze_matrix(),
+            "score": self.score(),
+            "introspect": self.introspect(),
+            "experience": self._experience_bounded(),            "matrix": self.analyze_matrix(),
             "health": self.health(),
             "doctor": doctor,
             "latest_gate": latest_gate,
@@ -1546,6 +1925,22 @@ class GeiterStore:
             "failed_checks": gate.get("failed_checks", []),
             "action": gate.get("action"),
             "next_action": gate.get("next_action"),
+        }
+
+    def _experience_bounded(self) -> dict[str, Any]:
+        """Return a bounded playbook summary without mutating state."""
+        try:
+            from .execute import experience  # local import avoids a cycle
+
+            report = experience(self)
+        except Exception:  # pragma: no cover - never break report on this
+            return {"status": "unavailable", "total_executions": 0, "strategies": []}
+        return {
+            "status": "available",
+            "total_executions": report["total_executions"],
+            "strategy_count": report["strategy_count"],
+            "top_strategy": report["strategies"][0] if report["strategies"] else None,
+            "recommendation": report["recommendation"],
         }
 
     @staticmethod

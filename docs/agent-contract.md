@@ -12,6 +12,8 @@ prompt add <text> [--intent <intent>] --json
 prompt list --json
 observe <prompt-id> --provider <name> --answer <text> [--citation <url>] [--run-id <run-id>] --json
 analyze --json
+score --json
+introspect --json
 health --json
 matrix --json
 doctor --json
@@ -30,6 +32,12 @@ experiment propose --hypothesis <text> --change <text> [--risk <level>] --json
 experiment approve --id <experiment-id> --json
 experiment result --id <experiment-id> --outcome <supported|rejected|inconclusive> --evidence <text> --json
 iterate [--hypothesis <text>] --json
+execute --heading <heading> --body <body> [--baseline-id <id>] [--target <token>] --json
+govern propose --surface-id <id> --heading <heading> --body <body> [--level <auto|approve|deny>] [--target <token>] --json
+govern approve <request-id> [--approver <who>] --json
+govern reject <request-id> [--approver <who>] --json
+govern list --json
+experience --json
 action list [--status <open|in_progress|completed|skipped|stale|all>] --json
 action propose --type <type> --prompt <text> [--priority <normal|high|critical>] [--source <source>] [--dedupe-key <key>] --json
 action complete <action-id> --evidence <text> --json
@@ -169,3 +177,106 @@ answer(prompt: str) -> ProviderAnswer
 
 Use `target_citation_rate` for source attribution. `citation_rate` alone only
 means the provider returned some citation.
+
+## Concurrency
+
+Multiple agents or processes may share one workspace. Every state-mutating
+operation runs while holding a reentrant advisory lock on a sidecar
+`.geiter/state.lock` file, so a full read-modify-write cycle is atomic with
+respect to other processes and no update is lost. The lock is reentrant, so
+nested calls such as `iterate` -> `inspect` -> `add` are safe. If the lock
+cannot be acquired within the timeout, the operation fails loudly with a
+`TimeoutError` instead of corrupting the state file. Credentials and provider
+configuration are never written into the locked state.
+
+## Self-assessment
+
+`score` returns a `geiter/score-v1` object. `north_star` is a single 0-100
+value where higher is always better, so it can be compared across runs. It is a
+weighted blend of four dimensions: `mention` (0.25), `target_citation` (0.35),
+`citation_rank` (0.20, the direction-safe reciprocal rank), and `coverage` (0.20,
+the share of configured prompts with at least one usable observation). Each
+dimension is reported with its own value, weight, and sample size. When the
+usable sample is smaller than `minimum_sample`, the score reports
+`status = insufficient_data` and no `north_star` value rather than presenting a
+misleading total. `weakest_dimension` names the lowest-scoring dimension that has
+enough data to be meaningful.
+
+`introspect` returns a `geiter/introspect-v1` object. It is read-only and ranks
+`opportunities` by priority from three evidence sources: unobserved configured
+prompts, unusable observations that are excluded from aggregates, and
+coverage-matrix cells that are mentioned but never attributed a citation. Each
+opportunity carries the evidence that produced it. This is the surface an agent
+should read to decide which single change to make next.
+
+Both surfaces are available as the CLI commands `score` and `introspect`, the
+gateway tools `geiter_score` and `geiter_introspect`, and the resources
+`geiter://score` and `geiter://introspect`. A bounded form is included in
+`report` and in the agent bootstrap context as `self_assessment`.
+
+## Autonomous execution
+
+`execute` returns a `geiter/execution-v1` object and runs one verified change
+cycle:
+
+1. `propose` derives a change from `introspect`, so it is grounded in evidence.
+2. `snapshot` records the current surface so the change is reversible.
+3. `apply` edits the local sandbox surface.
+4. `re-observe` runs a surface-aware provider that answers from the live content.
+5. `gate` evaluates the change with the existing regression gate.
+6. `accept or revert` keeps the change when the gate passes, otherwise restores
+   the snapshot and records the outcome as an `execution.result` learning.
+
+The regression gate is the arbiter: an agent may act on its own, but it may not
+keep a change that its own evidence rejects. The surface is a local sandbox
+directory and a provider that reads its live content, so the gate judges the
+real effect of a change rather than a canned response. Nothing in this loop
+touches external or real content. The surface is available as the CLI command
+`execute` and the gateway tool `geiter_execute`, and the contract is declared in
+capabilities metadata under `autonomous_execution`.
+
+## Change governance
+
+Autonomous execution is bounded by an explicit surface policy. Every surface
+other than the trusted `sandbox` must declare a policy, and an undeclared
+surface defaults to `approve`, so a mistake can never silently mutate real
+content. Policy levels are `auto` (apply immediately), `approve` (wait for a
+human), and `deny` (refuse). `allowed_kinds` restricts which change kinds a
+surface accepts; a change kind outside the set is treated as `deny`.
+
+A governed change is persisted as a `change.approval_request` with status
+`pending_approval`, so it survives across processes. `geiter_approvals` (or
+`govern approve` / `govern reject`) decides a request and records the named
+approver. A decided request is idempotent: the first decision stands and cannot
+be overwritten. A rejected request never executes.
+
+Approval authorizes only the **attempt**, never the **outcome**. Once approved,
+the change is applied and then arbitrated by the regression gate exactly like an
+auto change, so an approved change is still reverted when the evidence rejects
+it. The contract is declared in capabilities metadata under
+`change_governance` with the `geiter/approvals-v1` schema.
+
+A workspace created by an older version is backfilled on read so a newly added
+collection never makes `doctor` fail for an existing state file.
+
+## Compounding experience
+
+Every executed change writes an `execution.result` learning containing the
+change kind, whether it was accepted, and the north-star score before and after.
+`experience` (`geiter/experience-v1`) aggregates that log into a durable
+playbook. For each change kind it reports `attempts`, `accepted`, `reverted`,
+`accept_rate`, `mean_score_delta`, `improved_count`, `regressed_count`, and
+whether the kind is `preference_eligible`. It also returns a `recommendation`
+naming the change kind the next cycle should use.
+
+When `execute` does not receive an explicit change kind, it selects one from
+this historical evidence, so a strategy that improved the score tends to be
+reused. A kind becomes eligible only after `minimum_samples_for_preference`
+attempts, which prevents a single lucky change from locking the loop into one
+strategy; before that, the loop falls back to the default kind deterministically.
+An explicit `kind` always overrides the recommendation.
+
+The surface is available as the CLI command `experience`, the gateway tool
+`geiter_experience`, and the resource `geiter://experience`. A bounded form is
+included in `report` and in the agent bootstrap context, so an agent can read
+what worked before choosing its next change.

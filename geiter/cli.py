@@ -5,6 +5,15 @@ import json
 from typing import Any
 
 from .core import GeiterStore
+from .execute import (
+    SandboxSurface,
+    decide_approval,
+    execute_cycle,
+    execute_governed,
+    experience,
+    list_approvals,
+    surface_provider_factory,
+)
 from .gateway import serve
 from .providers import load_provider, regression_run, resume_provider, run_provider
 
@@ -67,6 +76,10 @@ def parser() -> argparse.ArgumentParser:
 
     analyze = commands.add_parser("analyze", help="Analyze retrieval observations")
     analyze.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
+    score = commands.add_parser("score", help="Compute the north-star GEO score")
+    score.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
+    introspect = commands.add_parser("introspect", help="Rank evidence-backed improvement opportunities")
+    introspect.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
     health = commands.add_parser("health", help="Assess observation and provider quality")
     health.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
     matrix = commands.add_parser("matrix", help="Analyze coverage by provider and prompt intent")
@@ -112,6 +125,37 @@ def parser() -> argparse.ArgumentParser:
     iterate = commands.add_parser("iterate", help="Run one self-iteration cycle")
     iterate.add_argument("--hypothesis")
     iterate.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
+
+    execute = commands.add_parser(
+        "execute",
+        help="Run one autonomous propose/apply/verify cycle on the sandbox surface",
+    )
+    execute.add_argument("--heading", required=True, help="Section heading for the change")
+    execute.add_argument("--body", required=True, help="Body content for the change")
+    execute.add_argument("--baseline-id", help="Baseline used to judge the change")
+    execute.add_argument("--target", help="Target token used for attribution")
+    execute.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
+
+    govern = commands.add_parser(
+        "govern",
+        help="Propose, approve, or reject a change under an explicit surface policy",
+    )
+    govern.add_argument("operation", choices=("propose", "approve", "reject", "list"))
+    govern.add_argument("request_id", nargs="?")
+    govern.add_argument("--surface-id", default="knowledge")
+    govern.add_argument("--heading")
+    govern.add_argument("--body")
+    govern.add_argument("--level", choices=("auto", "approve", "deny"))
+    govern.add_argument("--allowed-kind", action="append", default=[])
+    govern.add_argument("--approver", default="human")
+    govern.add_argument("--request-id", dest="exec_request_id")
+    govern.add_argument("--target")
+    govern.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
+
+    commands.add_parser(
+        "experience",
+        help="Show the compounding playbook of historical change effectiveness",
+    ).add_argument("--json", action="store_true", help=argparse.SUPPRESS)
 
     goal = commands.add_parser("goal", help="Manage goals")
     goal.add_argument("action", choices=("add", "list"))
@@ -212,6 +256,10 @@ def main(argv: list[str] | None = None) -> None:
         }
     elif args.command == "analyze":
         result = store.analyze()
+    elif args.command == "score":
+        result = store.score()
+    elif args.command == "introspect":
+        result = store.introspect()
     elif args.command == "health":
         result = store.health()
     elif args.command == "matrix":
@@ -276,6 +324,54 @@ def main(argv: list[str] | None = None) -> None:
                 result = store.reclaim_action(args.action_id, evidence)
     elif args.command == "iterate":
         result = store.iterate(args.hypothesis)
+    elif args.command == "execute":
+        target = args.target or store.read()["identity"]["name"]
+        surface = SandboxSurface(store.root)
+        result = execute_cycle(
+            store,
+            args.heading,
+            args.body,
+            provider_factory=surface_provider_factory(surface, target),
+            baseline_id=args.baseline_id,
+            target=target,
+        )
+    elif args.command == "govern":
+        target = args.target or store.read()["identity"]["name"]
+        surface = SandboxSurface(store.root)
+        factory = surface_provider_factory(surface, target)
+        if args.operation == "list":
+            result = {
+                "schema": "geiter/approvals-v1",
+                "pending": list_approvals(store, "pending_approval"),
+                "approved": list_approvals(store, "approved"),
+                "rejected": list_approvals(store, "rejected"),
+            }
+        elif args.operation in {"approve", "reject"}:
+            if not args.request_id:
+                raise SystemExit(f"govern {args.operation} requires a request_id")
+            decision = "approved" if args.operation == "approve" else "rejected"
+            result = decide_approval(store, args.request_id, decision, args.approver)
+        else:
+            if not args.heading or not args.body:
+                raise SystemExit("govern propose requires --heading and --body")
+            declared = None
+            if args.level:
+                declared = {
+                    "level": args.level,
+                    "allowed_kinds": list(args.allowed_kind),
+                }
+            result = execute_governed(
+                store,
+                args.surface_id,
+                args.heading,
+                args.body,
+                provider_factory=factory,
+                declared_policy=declared,
+                target=target,
+                request_id=args.exec_request_id,
+            )
+    elif args.command == "experience":
+        result = experience(store)
     elif args.command == "goal":
         if args.action == "add":
             if not args.text:

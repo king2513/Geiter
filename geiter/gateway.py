@@ -57,6 +57,67 @@ TOOLS = [
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
+        "name": "geiter_score",
+        "description": "Compute the direction-safe north-star GEO score and weakest dimension.",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "geiter_introspect",
+        "description": "Rank evidence-backed opportunities for improving the knowledge surface.",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "geiter_execute",
+        "description": "Run one autonomous propose/apply/verify cycle on the sandbox surface; the gate accepts or reverts the change.",
+        "inputSchema": {
+            "type": "object",
+            "required": ["heading", "body"],
+            "properties": {
+                "heading": {"type": "string"},
+                "body": {"type": "string"},
+                "baseline_id": {"type": "string"},
+                "target": {"type": "string"},
+            },
+        },
+    },
+    {
+        "name": "geiter_experience",
+        "description": "Read the compounding playbook of historical change effectiveness and the recommended next strategy.",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "geiter_govern",
+        "description": "Propose a governed change for a surface policy; returns denied, pending_approval, or executed.",
+        "inputSchema": {
+            "type": "object",
+            "required": ["heading", "body"],
+            "properties": {
+                "surface_id": {"type": "string"},
+                "heading": {"type": "string"},
+                "body": {"type": "string"},
+                "policy": {"type": "object"},
+                "request_id": {"type": "string"},
+                "target": {"type": "string"},
+            },
+        },
+    },
+    {
+        "name": "geiter_approvals",
+        "description": "Approve or reject a pending change request, or list requests by status.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "operation": {"type": "string", "enum": ["approve", "reject", "list"]},
+                "request_id": {"type": "string"},
+                "approver": {"type": "string"},
+                "status": {
+                    "type": "string",
+                    "enum": ["pending_approval", "approved", "rejected"],
+                },
+            },
+        },
+    },
+    {
         "name": "geiter_health",
         "description": "Assess observation quality and provider health before trusting metrics.",
         "inputSchema": {"type": "object", "properties": {}},
@@ -256,6 +317,24 @@ RESOURCES = [
         "mimeType": "application/json",
     },
     {
+        "uri": "geiter://score",
+        "name": "Geiter score",
+        "description": "Direction-safe north-star GEO score with per-dimension detail.",
+        "mimeType": "application/json",
+    },
+    {
+        "uri": "geiter://introspect",
+        "name": "Geiter introspect",
+        "description": "Ranked, evidence-backed improvement opportunities for the knowledge surface.",
+        "mimeType": "application/json",
+    },
+    {
+        "uri": "geiter://experience",
+        "name": "Geiter experience",
+        "description": "Compounding playbook: historical change effectiveness and the recommended next strategy.",
+        "mimeType": "application/json",
+    },
+    {
         "uri": "geiter://capabilities",
         "name": "Geiter capabilities",
         "description": "Stable version, transport, schema, and agent entrypoint metadata.",
@@ -309,6 +388,14 @@ def dispatch(store: GeiterStore, request: dict[str, Any]) -> dict[str, Any] | No
             value = store.context()
         elif uri == "geiter://report":
             value = store.report()
+        elif uri == "geiter://score":
+            value = store.score()
+        elif uri == "geiter://introspect":
+            value = store.introspect()
+        elif uri == "geiter://experience":
+            from .execute import experience
+
+            value = experience(store)
         elif uri == "geiter://capabilities":
             value = store.capabilities()
         else:
@@ -335,6 +422,69 @@ def dispatch(store: GeiterStore, request: dict[str, Any]) -> dict[str, Any] | No
             )
         elif name == "geiter_analyze":
             value = store.analyze()
+        elif name == "geiter_score":
+            value = store.score()
+        elif name == "geiter_introspect":
+            value = store.introspect()
+        elif name == "geiter_execute":
+            from .execute import SandboxSurface, execute_cycle, surface_provider_factory
+
+            exec_target = args.get("target") or store.read()["identity"]["name"]
+            value = execute_cycle(
+                store,
+                args["heading"],
+                args["body"],
+                provider_factory=surface_provider_factory(
+                    SandboxSurface(store.root), exec_target
+                ),
+                baseline_id=args.get("baseline_id"),
+                target=exec_target,
+            )
+        elif name == "geiter_experience":
+            from .execute import experience
+
+            value = experience(store)
+        elif name == "geiter_govern":
+            from .execute import (
+                SandboxSurface,
+                execute_governed,
+                surface_provider_factory,
+            )
+
+            gov_target = args.get("target") or store.read()["identity"]["name"]
+            value = execute_governed(
+                store,
+                args.get("surface_id", "knowledge"),
+                args["heading"],
+                args["body"],
+                provider_factory=surface_provider_factory(
+                    SandboxSurface(store.root), gov_target
+                ),
+                declared_policy=args.get("policy"),
+                target=gov_target,
+                request_id=args.get("request_id"),
+            )
+        elif name == "geiter_approvals":
+            from .execute import decide_approval, list_approvals
+
+            operation = args.get("operation", "list")
+            if operation == "list":
+                value = {
+                    "schema": "geiter/approvals-v1",
+                    "requests": list_approvals(
+                        store, args.get("status", "pending_approval")
+                    ),
+                }
+            else:
+                if not args.get("request_id"):
+                    raise ValueError("geiter_approvals requires request_id to decide")
+                decision = "approved" if operation == "approve" else "rejected"
+                value = decide_approval(
+                    store,
+                    args["request_id"],
+                    decision,
+                    args.get("approver", "human"),
+                )
         elif name == "geiter_health":
             value = store.health()
         elif name == "geiter_runs":
