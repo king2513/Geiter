@@ -48,6 +48,10 @@ event list --json
 
 For process-based integrations, run `python -m geiter gateway` and send one
 JSON-RPC request per line over stdin. Responses are one JSON object per line.
+The gateway uses the MCP response shape: `tools/list`, `resources/list`, and
+`resources/read` return their result body directly; `tools/call` returns
+`result.content[]` text items containing the tool's JSON payload and sets
+`result.isError` explicitly.
 `initialize` advertises both `tools` and `resources` capabilities. Invalid
 JSON-RPC envelopes return `-32600`; unexpected server failures return `-32603`.
 The gateway exposes the same contract through typed tools for status, prompts,

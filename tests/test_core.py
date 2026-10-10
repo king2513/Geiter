@@ -772,7 +772,7 @@ class GeiterStoreTests(unittest.TestCase):
     def test_gateway_exposes_tools_and_calls_domain(self):
         self.store.init()
         listed = dispatch(self.store, {"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
-        names = {tool["name"] for tool in listed["result"]["content"][0]["json"]["tools"]}
+        names = {tool["name"] for tool in listed["result"]["tools"]}
         self.assertIn("geiter_add_prompt", names)
         self.assertIn("geiter_context", names)
         response = dispatch(
@@ -784,14 +784,14 @@ class GeiterStoreTests(unittest.TestCase):
                 "params": {"name": "geiter_add_prompt", "arguments": {"text": "What is Geiter?"}},
             },
         )
-        self.assertEqual(response["result"]["content"][0]["json"]["kind"], "prompt")
+        self.assertEqual(json.loads(response["result"]["content"][0]["text"])["kind"], "prompt")
 
     def test_gateway_advertises_capabilities_and_rejects_invalid_requests(self):
         self.store.init()
         initialized = dispatch(self.store, {
             "jsonrpc": "2.0", "id": 15, "method": "initialize", "params": {},
         })
-        capabilities = initialized["result"]["content"][0]["json"]["capabilities"]
+        capabilities = initialized["result"]["capabilities"]
         self.assertIn("tools", capabilities)
         self.assertIn("resources", capabilities)
         invalid = dispatch(self.store, {"jsonrpc": "1.0", "id": 16, "method": "tools/list"})
@@ -800,7 +800,7 @@ class GeiterStoreTests(unittest.TestCase):
     def test_capabilities_are_available_as_resource_and_tool(self):
         self.store.init()
         listed = dispatch(self.store, {"jsonrpc": "2.0", "id": 17, "method": "resources/list"})
-        uris = {item["uri"] for item in listed["result"]["content"][0]["json"]["resources"]}
+        uris = {item["uri"] for item in listed["result"]["resources"]}
         self.assertIn("geiter://capabilities", uris)
         self.assertIn("geiter://context", uris)
         resource = dispatch(self.store, {
@@ -808,27 +808,27 @@ class GeiterStoreTests(unittest.TestCase):
             "params": {"uri": "geiter://capabilities"},
         })
         resource_value = json.loads(
-            resource["result"]["content"][0]["json"]["contents"][0]["text"]
+            resource["result"]["contents"][0]["text"]
         )
         tool = dispatch(self.store, {
             "jsonrpc": "2.0", "id": 19, "method": "tools/call",
             "params": {"name": "geiter_capabilities", "arguments": {}},
         })
-        self.assertEqual(resource_value, tool["result"]["content"][0]["json"])
+        self.assertEqual(resource_value, json.loads(tool["result"]["content"][0]["text"]))
         self.assertEqual(resource_value["schema"], "geiter/capabilities-v1")
         context = dispatch(self.store, {
             "jsonrpc": "2.0", "id": 28, "method": "resources/read",
             "params": {"uri": "geiter://context"},
         })
         context_value = json.loads(
-            context["result"]["content"][0]["json"]["contents"][0]["text"]
+            context["result"]["contents"][0]["text"]
         )
         self.assertEqual(context_value["schema"], "geiter/context-v1")
         context_tool = dispatch(self.store, {
             "jsonrpc": "2.0", "id": 29, "method": "tools/call",
             "params": {"name": "geiter_context", "arguments": {}},
         })
-        tool_value = context_tool["result"]["content"][0]["json"]
+        tool_value = json.loads(context_tool["result"]["content"][0]["text"])
         self.assertEqual(tool_value["schema"], "geiter/context-v1")
         self.assertEqual(tool_value["status"], context_value["status"])
         self.assertEqual(tool_value["decision"], context_value["decision"])
@@ -1027,9 +1027,9 @@ class GeiterStoreTests(unittest.TestCase):
         prompt = self.store.add_prompt("What is Geiter?")
         run = self.store.start_run("fixture", [prompt["id"]], max_attempts=2)
         listed = dispatch(self.store, {"jsonrpc": "2.0", "id": 11, "method": "tools/list"})
-        names = {tool["name"] for tool in listed["result"]["content"][0]["json"]["tools"]}
+        names = {tool["name"] for tool in listed["result"]["tools"]}
         self.assertIn("geiter_resume", names)
-        tools = listed["result"]["content"][0]["json"]["tools"]
+        tools = listed["result"]["tools"]
         regression_schema = next(tool for tool in tools if tool["name"] == "geiter_regression")["inputSchema"]
         resume_schema = next(tool for tool in tools if tool["name"] == "geiter_resume")["inputSchema"]
         complete_schema = next(tool for tool in tools if tool["name"] == "geiter_complete_action")["inputSchema"]
@@ -1047,7 +1047,7 @@ class GeiterStoreTests(unittest.TestCase):
                 "arguments": {"run_id": run["id"], "provider": "fixture"},
             },
         })
-        value = response["result"]["content"][0]["json"]
+        value = json.loads(response["result"]["content"][0]["text"])
         self.assertEqual(value["resumed_from"], run["id"])
         self.assertEqual(value["run"]["data"]["status"], "completed")
 
@@ -1058,13 +1058,13 @@ class GeiterStoreTests(unittest.TestCase):
         self.assertEqual(config["protocol"], "json-rpc")
         self.assertEqual(config["args"][-1], "gateway")
         listed = dispatch(self.store, {"jsonrpc": "2.0", "id": 13, "method": "tools/list"})
-        names = {tool["name"] for tool in listed["result"]["content"][0]["json"]["tools"]}
+        names = {tool["name"] for tool in listed["result"]["tools"]}
         self.assertIn("geiter_connect", names)
         response = dispatch(self.store, {
             "jsonrpc": "2.0", "id": 14, "method": "tools/call",
             "params": {"name": "geiter_connect", "arguments": {"format": "vscode"}},
         })
-        value = response["result"]["content"][0]["json"]
+        value = json.loads(response["result"]["content"][0]["text"])
         self.assertEqual(value["servers"]["geiter"]["type"], "stdio")
 
     def test_regression_gate_is_machine_decidable(self):
@@ -1270,7 +1270,7 @@ class GeiterStoreTests(unittest.TestCase):
             "jsonrpc": "2.0", "id": 20, "method": "tools/call",
             "params": {"name": "geiter_actions", "arguments": {}},
         })
-        self.assertEqual(listed["result"]["content"][0]["json"][0]["id"], action["id"])
+        self.assertEqual(json.loads(listed["result"]["content"][0]["text"])[0]["id"], action["id"])
         completed = dispatch(self.store, {
             "jsonrpc": "2.0", "id": 21, "method": "tools/call",
             "params": {
@@ -1279,12 +1279,12 @@ class GeiterStoreTests(unittest.TestCase):
             },
         })
         self.assertEqual(
-            completed["result"]["content"][0]["json"]["data"]["status"], "completed"
+            json.loads(completed["result"]["content"][0]["text"])["data"]["status"], "completed"
         )
         listed = dispatch(self.store, {
             "jsonrpc": "2.0", "id": 22, "method": "tools/list",
         })
-        names = {tool["name"] for tool in listed["result"]["content"][0]["json"]["tools"]}
+        names = {tool["name"] for tool in listed["result"]["tools"]}
         self.assertIn("geiter_capabilities", names)
         self.assertIn("geiter_propose_action", names)
         self.assertIn("geiter_skip_action", names)
@@ -1308,8 +1308,8 @@ class GeiterStoreTests(unittest.TestCase):
         }
         first = dispatch(self.store, request)
         second = dispatch(self.store, {**request, "id": 27})
-        first_action = first["result"]["content"][0]["json"]
-        second_action = second["result"]["content"][0]["json"]
+        first_action = json.loads(first["result"]["content"][0]["text"])
+        second_action = json.loads(second["result"]["content"][0]["text"])
         self.assertEqual(first_action["id"], second_action["id"])
         self.assertEqual(first_action["data"]["priority"], "high")
         self.assertEqual(first_action["data"]["evidence"], {"origin": "test"})
@@ -1323,12 +1323,12 @@ class GeiterStoreTests(unittest.TestCase):
             "jsonrpc": "2.0", "id": 23, "method": "tools/call",
             "params": {"name": "geiter_actions", "arguments": {"status": "stale"}},
         })
-        self.assertEqual(stale["result"]["content"][0]["json"][0]["id"], action["id"])
+        self.assertEqual(json.loads(stale["result"]["content"][0]["text"])[0]["id"], action["id"])
         all_actions = dispatch(self.store, {
             "jsonrpc": "2.0", "id": 25, "method": "tools/call",
             "params": {"name": "geiter_actions", "arguments": {"status": "all"}},
         })
-        self.assertEqual(all_actions["result"]["content"][0]["json"][0]["id"], action["id"])
+        self.assertEqual(json.loads(all_actions["result"]["content"][0]["text"])[0]["id"], action["id"])
         reclaimed = dispatch(self.store, {
             "jsonrpc": "2.0", "id": 24, "method": "tools/call",
             "params": {
@@ -1337,13 +1337,13 @@ class GeiterStoreTests(unittest.TestCase):
             },
         })
         self.assertEqual(
-            reclaimed["result"]["content"][0]["json"]["data"]["status"], "open"
+            json.loads(reclaimed["result"]["content"][0]["text"])["data"]["status"], "open"
         )
 
     def test_gateway_exposes_resources(self):
         self.store.init()
         listed = dispatch(self.store, {"jsonrpc": "2.0", "id": 4, "method": "resources/list"})
-        uris = {item["uri"] for item in listed["result"]["content"][0]["json"]["resources"]}
+        uris = {item["uri"] for item in listed["result"]["resources"]}
         self.assertEqual(
             uris,
             {
@@ -1360,12 +1360,12 @@ class GeiterStoreTests(unittest.TestCase):
             "jsonrpc": "2.0", "id": 5, "method": "resources/read",
             "params": {"uri": "geiter://status"},
         })
-        self.assertEqual(read["result"]["content"][0]["json"]["contents"][0]["uri"], "geiter://status")
+        self.assertEqual(read["result"]["contents"][0]["uri"], "geiter://status")
 
     def test_gateway_exposes_self_assessment_surfaces(self):
         self.store.init()
         listed = dispatch(self.store, {"jsonrpc": "2.0", "id": 40, "method": "tools/list"})
-        names = {tool["name"] for tool in listed["result"]["content"][0]["json"]["tools"]}
+        names = {tool["name"] for tool in listed["result"]["tools"]}
         self.assertIn("geiter_score", names)
         self.assertIn("geiter_introspect", names)
         self.assertIn("geiter_execute", names)
@@ -1374,20 +1374,20 @@ class GeiterStoreTests(unittest.TestCase):
             "params": {"name": "geiter_score", "arguments": {}},
         })
         self.assertEqual(
-            score["result"]["content"][0]["json"]["schema"], "geiter/score-v1"
+            json.loads(score["result"]["content"][0]["text"])["schema"], "geiter/score-v1"
         )
         introspect = dispatch(self.store, {
             "jsonrpc": "2.0", "id": 42, "method": "tools/call",
             "params": {"name": "geiter_introspect", "arguments": {}},
         })
         self.assertEqual(
-            introspect["result"]["content"][0]["json"]["schema"], "geiter/introspect-v1"
+            json.loads(introspect["result"]["content"][0]["text"])["schema"], "geiter/introspect-v1"
         )
         read = dispatch(self.store, {
             "jsonrpc": "2.0", "id": 43, "method": "resources/read",
             "params": {"uri": "geiter://score"},
         })
-        self.assertEqual(read["result"]["content"][0]["json"]["contents"][0]["uri"], "geiter://score")
+        self.assertEqual(read["result"]["contents"][0]["uri"], "geiter://score")
 
     def test_gateway_execute_runs_a_verified_cycle(self):
         self.store.init()
@@ -1403,7 +1403,7 @@ class GeiterStoreTests(unittest.TestCase):
                 },
             },
         })
-        payload = response["result"]["content"][0]["json"]
+        payload = json.loads(response["result"]["content"][0]["text"])
         self.assertEqual(payload["schema"], "geiter/execution-v1")
         self.assertIn("verdict", payload)
         self.assertIn("change_id", payload["verdict"])
@@ -1411,7 +1411,7 @@ class GeiterStoreTests(unittest.TestCase):
     def test_gateway_govern_and_approvals(self):
         self.store.init()
         listed = dispatch(self.store, {"jsonrpc": "2.0", "id": 60, "method": "tools/list"})
-        names = {tool["name"] for tool in listed["result"]["content"][0]["json"]["tools"]}
+        names = {tool["name"] for tool in listed["result"]["tools"]}
         self.assertIn("geiter_govern", names)
         self.assertIn("geiter_approvals", names)
         # An undeclared surface must not auto-execute.
@@ -1426,7 +1426,7 @@ class GeiterStoreTests(unittest.TestCase):
                 },
             },
         })
-        payload = proposed["result"]["content"][0]["json"]
+        payload = json.loads(proposed["result"]["content"][0]["text"])
         self.assertEqual(payload["status"], "pending_approval")
         request_id = payload["approval_request_id"]
         # Approve it through the gateway.
@@ -1442,13 +1442,13 @@ class GeiterStoreTests(unittest.TestCase):
             },
         })
         self.assertEqual(
-            approved["result"]["content"][0]["json"]["data"]["status"], "approved"
+            json.loads(approved["result"]["content"][0]["text"])["data"]["status"], "approved"
         )
 
     def test_gateway_exposes_experiment_tools(self):
         self.store.init()
         listed = dispatch(self.store, {"jsonrpc": "2.0", "id": 6, "method": "tools/list"})
-        names = {tool["name"] for tool in listed["result"]["content"][0]["json"]["tools"]}
+        names = {tool["name"] for tool in listed["result"]["tools"]}
         self.assertIn("geiter_save_baseline", names)
         self.assertIn("geiter_compare", names)
         self.assertIn("geiter_propose_experiment", names)

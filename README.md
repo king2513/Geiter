@@ -208,6 +208,10 @@ action instead of silently selecting another baseline.
 the version, state and report schemas, transport, entrypoints, and operating
 principles without changing workspace state.
 
+The stdio gateway follows the MCP JSON-RPC response shape: discovery and
+resource methods return their result body directly, while `tools/call` returns
+tool output as JSON text content with an explicit `isError` flag.
+
 Regression gate actions are persisted in the workspace. `iterate` claims the
 highest-priority open action without pretending to execute external work.
 Agents can propose work with `action propose`, inspect it by priority with
@@ -353,6 +357,14 @@ store from focused mixin modules so each responsibility lives in its own file:
 `core.py` also owns the cross-process file lock and the `Record` primitive, so
 the mixins import those shared pieces from it without creating a cycle.
 
-## Next frontier
+## P4 preparation
 
-The active project frontier is live provider adapters, richer retrieval evaluators, policy-gated experiments, and a SQLite backend when query volume outgrows the local JSON contract.
+P0-P3 are implemented and currently provide a durable agent-native loop:
+observe, measure, compare, gate, queue work, claim it safely, execute bounded
+changes, govern real surfaces, and learn from accepted or reverted strategies.
+The P4 preparation plan is in [docs/p4-plan.md](docs/p4-plan.md).
+
+P4 implementation is intentionally pending explicit authorization. The plan
+prioritizes richer retrieval evaluation and multi-provider evidence first,
+then operational storage and broader governed execution. It preserves the
+current JSON contracts, replay-first testing, and policy boundary.

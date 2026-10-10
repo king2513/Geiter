@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.26.2 - 2026-10-10
+
+- aligned the stdio gateway success envelopes with MCP JSON-RPC semantics
+- kept tool payloads as JSON text inside `tools/call` content while leaving
+  `tools/list`, `resources/list`, and `resources/read` result bodies unwrapped
+- updated gateway contract tests for the interoperable response shape
+
 ## 1.26.1 - 2026-10-08
 
 - split the store into focused modules (`persistence`, `observations`, `runs`, `actions`, `analysis`, `baselines`, `experiments`, `gate`, `iteration`, `surfaces`) composed as mixins, reducing `core.py` from 1957 to 176 lines

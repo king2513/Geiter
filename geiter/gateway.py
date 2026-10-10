@@ -343,8 +343,17 @@ RESOURCES = [
 ]
 
 
-def _result(request_id: Any, value: Any) -> dict[str, Any]:
-    return {"jsonrpc": "2.0", "id": request_id, "result": {"content": [{"type": "json", "json": value}]}}
+def _ok(request_id: Any, result: Any) -> dict[str, Any]:
+    """Spec-compliant MCP success response: ``result`` is the raw MCP result body."""
+    return {"jsonrpc": "2.0", "id": request_id, "result": result}
+
+
+def _call_result(request_id: Any, value: Any) -> dict[str, Any]:
+    """Wrap a tool's returned value as a standard MCP ``tools/call`` result."""
+    return _ok(request_id, {
+        "content": [{"type": "text", "text": json.dumps(value, ensure_ascii=False)}],
+        "isError": False,
+    })
 
 
 def _error(request_id: Any, code: int, message: str) -> dict[str, Any]:
@@ -369,7 +378,7 @@ def dispatch(store: GeiterStore, request: dict[str, Any]) -> dict[str, Any] | No
     method = request.get("method")
     params = request.get("params") or {}
     if method == "initialize":
-        return _result(request_id, {
+        return _ok(request_id, {
             "protocolVersion": "2025-06-18",
             "serverInfo": {"name": "geiter", "version": __version__},
             "capabilities": {"tools": {}, "resources": {}},
@@ -377,9 +386,9 @@ def dispatch(store: GeiterStore, request: dict[str, Any]) -> dict[str, Any] | No
     if method == "notifications/initialized":
         return None
     if method == "tools/list":
-        return _result(request_id, {"tools": TOOLS})
+        return _ok(request_id, {"tools": TOOLS})
     if method == "resources/list":
-        return _result(request_id, {"resources": RESOURCES})
+        return _ok(request_id, {"resources": RESOURCES})
     if method == "resources/read":
         uri = params.get("uri")
         if uri == "geiter://status":
@@ -400,7 +409,7 @@ def dispatch(store: GeiterStore, request: dict[str, Any]) -> dict[str, Any] | No
             value = store.capabilities()
         else:
             return _error(request_id, -32002, f"unknown resource: {uri}")
-        return _result(request_id, {"contents": [{"uri": uri, "mimeType": "application/json", "text": json.dumps(value, ensure_ascii=False)}]})
+        return _ok(request_id, {"contents": [{"uri": uri, "mimeType": "application/json", "text": json.dumps(value, ensure_ascii=False)}]})
     if method != "tools/call":
         return _error(request_id, -32601, f"unknown method: {method}")
 
@@ -568,7 +577,7 @@ def dispatch(store: GeiterStore, request: dict[str, Any]) -> dict[str, Any] | No
             return _error(request_id, -32602, f"unknown tool: {name}")
     except (KeyError, ValueError) as exc:
         return _error(request_id, -32602, str(exc))
-    return _result(request_id, value)
+    return _call_result(request_id, value)
 
 
 def serve(root: str = ".") -> None:
