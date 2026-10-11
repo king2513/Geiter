@@ -565,6 +565,32 @@ class GeiterStoreTests(unittest.TestCase):
         # And the strategies are ranked best-first.
         self.assertEqual(report["strategies"][0]["kind"], "good_kind")
 
+    def test_recommend_kind_surfaces_recent_failure_classes(self):
+        store = GeiterStore(self.tempdir.name)
+        store.init()
+        for index in range(2):
+            store.add("learnings", "execution.result", {
+                "change_id": f"good-{index}",
+                "kind": "good_kind",
+                "accepted": True,
+                "verdict": {"score_before": 40.0, "score_after": 55.0},
+            })
+        for index in range(2):
+            store.add("learnings", "execution.result", {
+                "change_id": f"failed-{index}",
+                "kind": "bad_kind",
+                "accepted": False,
+                "verdict": {
+                    "score_before": 55.0,
+                    "score_after": 50.0,
+                    "gate_failed_checks": ["workspace_score"],
+                },
+            })
+        recommendation = recommend_kind(store)
+        self.assertEqual(recommendation["kind"], "good_kind")
+        self.assertEqual(recommendation["failure_classes"], ["workspace_regression"])
+        self.assertIn("recent_failure_classes", recommendation["reason"])
+
     def test_experience_playbook_surface(self):
         store = GeiterStore(self.tempdir.name)
         store.init()

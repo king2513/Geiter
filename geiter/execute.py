@@ -131,6 +131,19 @@ def recommend_kind(store: GeiterStore) -> dict[str, Any]:
     to the default and says so, keeping the loop deterministic on a cold start.
     """
     report = effectiveness(store)
+    recent_results = [
+        item for item in store.read().get("learnings", [])
+        if item.get("kind") == "execution.result"
+    ]
+    recent_failures = [
+        _execution_failure_summary(item)
+        for item in recent_results[-MIN_SAMPLES_FOR_PREFERENCE:]
+        if not item.get("data", {}).get("accepted")
+    ]
+    repeated_failure_classes = {
+        failure["failure_class"]
+        for failure in recent_failures
+    }
     eligible = [item for item in report["strategies"] if item["preference_eligible"]]
     if not eligible:
         return {
@@ -156,6 +169,16 @@ def recommend_kind(store: GeiterStore) -> dict[str, Any]:
             "experience": report,
         }
     best = eligible[0]
+    if repeated_failure_classes:
+        return {
+            "kind": best["kind"],
+            "reason": (
+                "prefer_best_known_strategy_after_recent_failure_classes: "
+                + ",".join(sorted(repeated_failure_classes))
+            ),
+            "failure_classes": sorted(repeated_failure_classes),
+            "experience": report,
+        }
     return {
         "kind": best["kind"],
         "reason": (

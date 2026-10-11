@@ -117,6 +117,8 @@ learnings. Each `recent_failures[]` item also includes a stable
 The summary also returns `failure_classes`, a bounded count of recent failure
 categories, so an agent can detect repeated failure modes without replaying the
 raw learning ledger.
+The experience recommendation carries the recent failure classes when present,
+so strategy selection can expose why it is changing course.
 
 ## Stability rules
 
