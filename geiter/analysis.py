@@ -129,6 +129,30 @@ class AnalysisMixin:
         }
         opportunities: list[dict[str, Any]] = []
 
+        scored_provider_scores = [
+            (provider, scoped)
+            for provider, scoped in provider_scores.items()
+            if scoped.get("status") == "scored"
+        ]
+        if scored_provider_scores:
+            weakest_provider, weakest_provider_score = min(
+                scored_provider_scores,
+                key=lambda item: item[1]["north_star"],
+            )
+            opportunities.append({
+                "opportunity": "improve_provider",
+                "priority": "high",
+                "evidence": {
+                    "provider": weakest_provider,
+                    "north_star": weakest_provider_score["north_star"],
+                    "weakest_dimension": weakest_provider_score["weakest_dimension"],
+                },
+                "detail": (
+                    f"Provider '{weakest_provider}' is the weakest scored evidence source "
+                    f"at {weakest_provider_score['north_star']}; improve it before expanding scope."
+                ),
+            })
+
         unobserved = analysis["coverage"]["unobserved_prompt_ids"]
         if unobserved:
             opportunities.append({

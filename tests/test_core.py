@@ -939,6 +939,25 @@ class GeiterStoreTests(unittest.TestCase):
         self.assertEqual(result["opportunities"][0]["priority"], "high")
         self.assertIn("provider_scores", result)
 
+    def test_introspect_prioritizes_the_weakest_scored_provider(self):
+        self.store.init()
+        prompts = [
+            self.store.add_prompt("What is Geiter?", "discovery"),
+            self.store.add_prompt("Why use Geiter?", "evaluation"),
+        ]
+        for prompt in prompts:
+            self.store.record_observation(
+                prompt["id"], "fixture", "Geiter is useful.", ["https://geiter.dev/docs"]
+            )
+            self.store.record_observation(
+                prompt["id"], "surface", "Geiter is mentioned.", []
+            )
+
+        result = self.store.introspect()
+
+        self.assertEqual(result["opportunities"][0]["opportunity"], "improve_provider")
+        self.assertEqual(result["opportunities"][0]["evidence"]["provider"], "surface")
+
     def test_observation_metrics_and_analysis(self):
         self.store.init()
         prompt = self.store.add_prompt("What is Geiter?", "discovery")
