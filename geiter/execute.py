@@ -429,6 +429,11 @@ def execute_cycle(
     surface_info = surface.ensure()
     before_score = store.score()
     selection = recommend_kind(store) if kind is None else {"kind": kind, "reason": "explicit"}
+    execution_baseline = None
+    if store.analyze()["metrics"]["sample_size"] >= 2:
+        execution_baseline = store.save_baseline(
+            f"execution-before-{int(time.time() * 1000):x}"
+        )
 
     proposal = propose_change(store, surface, heading, body, kind=selection["kind"])
     snapshot_path = surface.snapshot(proposal.change_id)
@@ -444,7 +449,10 @@ def execute_cycle(
     from .providers import run_provider  # local import to avoid a cycle
 
     run = run_provider(store, prompts, provider, target, max_attempts=1)
-    gate = store.regression_gate(run["run"], baseline_id)
+    gate = store.regression_gate(
+        run["run"],
+        baseline_id or (execution_baseline or {}).get("id"),
+    )
     after_score = store.score()
 
     accepted = bool(gate.get("ok"))
@@ -485,6 +493,7 @@ def execute_cycle(
         "surface": surface_info,
         "strategy": selection,
         "proposal": proposal.to_dict(),
+        "execution_baseline": execution_baseline,
         "applied_path": str(applied_path),
         "run": run["run"],
         "gate": gate,

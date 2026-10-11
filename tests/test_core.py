@@ -647,7 +647,62 @@ class GeiterStoreTests(unittest.TestCase):
         self.assertEqual(result["schema"], "geiter/execution-v1")
         self.assertTrue(result["verdict"]["accepted"], result["verdict"])
         self.assertTrue(result["gate"]["ok"])
+        self.assertIsNone(result["execution_baseline"])
         self.assertIn("Geiter: overview", surface.read())
+
+    def test_execute_cycle_compares_against_automatic_surface_baseline(self):
+        store = GeiterStore(self.tempdir.name)
+        store.init()
+        target = store.read()["identity"]["name"]
+        prompt_a = store.add_prompt("What is Geiter?", "discovery")
+        prompt_b = store.add_prompt("Why use Geiter?", "evaluation")
+        for prompt in (prompt_a, prompt_b):
+            store.record_observation(
+                prompt["id"],
+                "surface",
+                f"{target} is an agent-native GEO runtime.",
+                [f"https://sandbox.invalid/{target.casefold()}"],
+            )
+        surface = SandboxSurface(self.tempdir.name)
+        surface.ensure()
+
+        result = execute_cycle(
+            store,
+            heading=f"{target}: overview",
+            body=f"{target} is an agent-native GEO runtime that is cited.",
+            provider_factory=surface_provider_factory(surface, target),
+            target=target,
+        )
+
+        self.assertTrue(result["verdict"]["accepted"], result["verdict"])
+        self.assertTrue(result["gate"]["ok"])
+        self.assertEqual(result["gate"]["comparison"]["pairing"]["pair_count"], 2)
+        self.assertEqual(result["execution_baseline"]["id"], result["gate"]["baseline_id"])
+
+    def test_execute_cycle_uses_execution_baseline_when_external_baseline_is_stale(self):
+        store = GeiterStore(self.tempdir.name)
+        store.init()
+        target = store.read()["identity"]["name"]
+        store.add_prompt("What is Geiter?", "discovery")
+        store.add_prompt("Why use Geiter?", "evaluation")
+        surface = SandboxSurface(self.tempdir.name)
+        surface.ensure()
+        external_baseline = store.save_baseline("external-replay-baseline")
+
+        result = execute_cycle(
+            store,
+            heading=f"{target}: overview",
+            body=f"{target} is an agent-native GEO runtime that is cited.",
+            provider_factory=surface_provider_factory(surface, target),
+            baseline_id=external_baseline["id"],
+            target=target,
+        )
+
+        self.assertFalse(result["verdict"]["accepted"])
+        self.assertEqual(result["gate"]["comparison"]["pairing"]["pair_count"], 0)
+        self.assertEqual(result["gate"]["comparison"]["verdict"], "insufficient_data")
+        self.assertEqual(result["gate"]["baseline_id"], external_baseline["id"])
+        self.assertTrue(result["verdict"]["revert"]["reverted"])
 
     def test_execute_cycle_reverts_a_change_the_gate_rejects(self):
         store = GeiterStore(self.tempdir.name)
