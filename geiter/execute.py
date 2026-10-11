@@ -40,7 +40,7 @@ def now_iso() -> str:
 # these learnable: effectiveness aggregates history per kind so later cycles
 # prefer strategies that have actually worked.
 DEFAULT_CHANGE_KIND = "append_section"
-EXPLORATION_CHANGE_KINDS = ("append_section", "replace_section")
+EXPLORATION_CHANGE_KINDS = ("append_section", "replace_section", "cite_target")
 MIN_SAMPLES_FOR_PREFERENCE = 2
 
 
@@ -416,10 +416,11 @@ class SurfaceProvider:
         content_terms = set(re.findall(r"[a-z0-9]+", lowered))
         relevant_terms = sorted(prompt_terms & content_terms)
         relevance = round(len(relevant_terms) / len(prompt_terms), 4) if prompt_terms else 0.0
-        # The surface provider is the evidence adapter for the target entity:
-        # once the live surface contains the entity, its synthetic citation
-        # points at the entity-specific evidence anchor.
-        cites_target = mentions
+        # Citation quality must be earned by explicit source material on the
+        # surface; mentioning the entity alone is not attribution evidence.
+        cites_target = mentions and bool(
+            re.search(r"\b(?:source|evidence|citation|reference)\b", lowered)
+        )
         if mentions and cites_target:
             answer = (
                 f"{self.target} is described on the knowledge surface. "
@@ -428,7 +429,11 @@ class SurfaceProvider:
             )
             citations = [f"https://sandbox.invalid/{target_token}#evidence"]
         elif mentions:
-            answer = f"{self.target} appears on the knowledge surface but is not cited."
+            answer = (
+                f"{self.target} is described on the knowledge surface but is not cited. "
+                f"Context: {prompt}"
+                + (f" Relevant terms: {', '.join(relevant_terms)}." if relevant_terms else "")
+            )
             citations = [f"https://sandbox.invalid/{target_token}"]
         else:
             answer = "The knowledge surface does not cover this topic yet."
@@ -517,6 +522,11 @@ def execute_cycle(
     try:
         if proposal.kind == "replace_section":
             applied_path = surface.replace_section(heading, body)
+        elif proposal.kind == "cite_target":
+            applied_path = surface.append_section(
+                heading,
+                f"{body.strip()}\n\nSource: {target or store.read()['identity']['name']} reference.",
+            )
         else:
             applied_path = surface.append_section(heading, body)
     except Exception as exc:

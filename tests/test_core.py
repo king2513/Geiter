@@ -516,7 +516,7 @@ class GeiterStoreTests(unittest.TestCase):
     def test_recommend_kind_does_not_repeat_a_failed_strategy_when_all_are_known(self):
         store = GeiterStore(self.tempdir.name)
         store.init()
-        for kind in ("append_section", "replace_section"):
+        for kind in ("append_section", "replace_section", "cite_target"):
             for index in range(2):
                 store.add("learnings", "execution.result", {
                     "change_id": f"{kind}-{index}",
@@ -715,7 +715,7 @@ class GeiterStoreTests(unittest.TestCase):
         surface.ensure(
             "# Knowledge surface\n\n"
             "## Geiter agent-first identity.\n\n"
-            "Geiter is an agent-native GEO runtime.\n"
+            "Geiter is an agent-native GEO runtime. Evidence: this identity is sourced.\n"
         )
         provider = SurfaceProvider(surface, "Geiter")
 
@@ -723,6 +723,21 @@ class GeiterStoreTests(unittest.TestCase):
 
         self.assertIn("Geiter is described", answer.answer)
         self.assertEqual(answer.citations, ["https://sandbox.invalid/geiter#evidence"])
+
+    def test_surface_provider_requires_explicit_evidence_for_target_citation(self):
+        from geiter.execute import SurfaceProvider
+
+        surface = SandboxSurface(self.tempdir.name)
+        surface.ensure("# Knowledge surface\n\n## Geiter\n\nGeiter is an agent-native GEO runtime.\n")
+        provider = SurfaceProvider(surface, "Geiter")
+
+        without_evidence = provider.answer("What is Geiter?")
+        self.assertEqual(without_evidence.citations, ["https://sandbox.invalid/geiter"])
+        self.assertIn("Geiter is described on the knowledge surface but is not cited.", without_evidence.answer)
+
+        surface.append_section("Evidence", "Source: Geiter reference.")
+        with_evidence = provider.answer("What is Geiter?")
+        self.assertEqual(with_evidence.citations, ["https://sandbox.invalid/geiter#evidence"])
 
     def test_surface_provider_answer_changes_with_prompt_relevant_content(self):
         from geiter.execute import SurfaceProvider
@@ -765,6 +780,27 @@ class GeiterStoreTests(unittest.TestCase):
         self.assertTrue(result["gate"]["ok"])
         self.assertIsNone(result["execution_baseline"])
         self.assertIn("Geiter: overview", surface.read())
+
+    def test_execute_cycle_cite_target_strategy_adds_verifiable_evidence(self):
+        store = GeiterStore(self.tempdir.name)
+        store.init()
+        target = store.read()["identity"]["name"]
+        store.add_prompt("What is Geiter?", "discovery")
+        store.add_prompt("Why use Geiter?", "evaluation")
+        surface = SandboxSurface(self.tempdir.name)
+        surface.ensure(f"# Knowledge surface\n\n## {target}\n\n{target} is an agent-native GEO runtime.\n")
+
+        result = execute_cycle(
+            store,
+            heading=f"{target}: source",
+            body=f"{target} is documented for agents.",
+            provider_factory=surface_provider_factory(surface, target),
+            target=target,
+            kind="cite_target",
+        )
+
+        self.assertTrue(result["verdict"]["accepted"], result["verdict"])
+        self.assertIn("Source:", surface.read())
 
     def test_execute_cycle_compares_against_automatic_surface_baseline(self):
         store = GeiterStore(self.tempdir.name)
