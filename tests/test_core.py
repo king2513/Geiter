@@ -513,6 +513,24 @@ class GeiterStoreTests(unittest.TestCase):
             "explore_untried_change_kind_after_non_positive_history",
         )
 
+    def test_recommend_kind_does_not_repeat_a_failed_strategy_when_all_are_known(self):
+        store = GeiterStore(self.tempdir.name)
+        store.init()
+        for kind in ("append_section", "replace_section"):
+            for index in range(2):
+                store.add("learnings", "execution.result", {
+                    "change_id": f"{kind}-{index}",
+                    "kind": kind,
+                    "accepted": False,
+                    "verdict": {"score_before": 50.0, "score_after": 40.0},
+                })
+        recommendation = recommend_kind(store)
+        self.assertEqual(recommendation["kind"], "append_section")
+        self.assertEqual(
+            recommendation["reason"],
+            "all_eligible_change_kinds_have_non_positive_history",
+        )
+
     def test_effectiveness_prefers_the_strategy_that_improved(self):
         store = GeiterStore(self.tempdir.name)
         store.init()

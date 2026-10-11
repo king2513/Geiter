@@ -150,6 +150,11 @@ def recommend_kind(store: GeiterStore) -> dict[str, Any]:
                 "reason": "explore_untried_change_kind_after_non_positive_history",
                 "experience": report,
             }
+        return {
+            "kind": DEFAULT_CHANGE_KIND,
+            "reason": "all_eligible_change_kinds_have_non_positive_history",
+            "experience": report,
+        }
     best = eligible[0]
     return {
         "kind": best["kind"],
