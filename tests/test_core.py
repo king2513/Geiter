@@ -751,6 +751,8 @@ class GeiterStoreTests(unittest.TestCase):
         self.assertEqual(result["execution_baseline"]["id"], result["gate"]["baseline_id"])
         self.assertEqual(result["verdict"]["execution_scope"]["verdict"], "flat")
         self.assertFalse(result["verdict"]["scope_regressed"])
+        self.assertIn("scope_score_before", result["verdict"])
+        self.assertIn("scope_score_after", result["verdict"])
 
     def test_execute_cycle_reverts_when_workspace_score_regresses(self):
         store = GeiterStore(self.tempdir.name)
@@ -781,6 +783,37 @@ class GeiterStoreTests(unittest.TestCase):
         self.assertTrue(result["verdict"]["score_regressed"])
         self.assertIn("workspace_score", result["verdict"]["gate_failed_checks"])
         self.assertIn("execution_scope", result["verdict"])
+        self.assertTrue(result["verdict"]["revert"]["reverted"])
+        self.assertEqual(surface.read(), before)
+
+    def test_execute_cycle_protects_surface_provider_scope(self):
+        store = GeiterStore(self.tempdir.name)
+        store.init()
+        target = store.read()["identity"]["name"]
+        prompt_a = store.add_prompt("What is Geiter?", "discovery")
+        prompt_b = store.add_prompt("Why use Geiter?", "evaluation")
+        for prompt in (prompt_a, prompt_b):
+            store.record_observation(
+                prompt["id"],
+                "surface",
+                f"{target} is an agent-native GEO runtime.",
+                [f"https://sandbox.invalid/{target.casefold()}/docs"],
+            )
+        surface = SandboxSurface(self.tempdir.name)
+        surface.ensure()
+        before = surface.read()
+
+        result = execute_cycle(
+            store,
+            heading=f"{target}: overview",
+            body="A generic section without the target citation.",
+            provider_factory=surface_provider_factory(surface, target),
+            target=target,
+        )
+
+        self.assertFalse(result["verdict"]["accepted"])
+        self.assertTrue(result["verdict"]["scope_score_regressed"])
+        self.assertIn("provider_scope_score", result["verdict"]["gate_failed_checks"])
         self.assertTrue(result["verdict"]["revert"]["reverted"])
         self.assertEqual(surface.read(), before)
 
@@ -921,6 +954,29 @@ class GeiterStoreTests(unittest.TestCase):
         self.assertEqual(strong["provider"], "strong")
         self.assertEqual(weak["provider"], "weak")
         self.assertGreater(strong["north_star"], weak["north_star"])
+
+    def test_score_can_be_scoped_to_provider_and_intent(self):
+        self.store.init()
+        discovery = self.store.add_prompt("What is Geiter?", "discovery")
+        evaluation = self.store.add_prompt("Why use Geiter?", "evaluation")
+        self.store.record_observation(
+            discovery["id"], "surface", "Geiter is useful.", ["https://sandbox.invalid/geiter/docs"]
+        )
+        self.store.record_observation(
+            discovery["id"], "surface", "Geiter is useful again.", ["https://sandbox.invalid/geiter/docs"]
+        )
+        self.store.record_observation(
+            evaluation["id"], "surface", "Geiter is mentioned.", []
+        )
+        self.store.record_observation(
+            discovery["id"], "surface", "Geiter is useful.", ["https://sandbox.invalid/geiter/docs"]
+        )
+
+        scoped = self.store.score("surface", "discovery")
+
+        self.assertEqual(scoped["provider"], "surface")
+        self.assertEqual(scoped["intent"], "discovery")
+        self.assertEqual(scoped["north_star"], 100.0)
 
     def test_introspect_ranks_evidence_backed_opportunities(self):
         self.store.init()

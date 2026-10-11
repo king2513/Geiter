@@ -218,7 +218,11 @@ dimension is reported with its own value, weight, and sample size. When the
 usable sample is smaller than `minimum_sample`, the score reports
 `status = insufficient_data` and no `north_star` value rather than presenting a
 misleading total. `weakest_dimension` names the lowest-scoring dimension that has
-enough data to be meaningful.
+enough data to be meaningful. The score can be scoped with `--provider <name>`,
+`--intent <intent>`, or both. Scoped scores filter usable observations first;
+when an intent is supplied, coverage is calculated against only the configured
+prompts carrying that intent. The response echoes the active `provider` and
+`intent` so an agent can keep the scope attached to the decision.
 
 `introspect` returns a `geiter/introspect-v1` object. It is read-only and ranks
 `opportunities` by priority from three evidence sources: unobserved configured

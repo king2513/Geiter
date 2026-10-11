@@ -250,7 +250,9 @@ Geiter can answer two questions an agent needs before choosing its next move:
   detail and a `weakest_dimension` pointer. Higher is always better, so a rising
   score means the knowledge surface is easier to discover and attribute. When the
   usable sample is too small the score reports `insufficient_data` instead of
-  inventing a number.
+  inventing a number. Agents can scope it with `score --provider <name>`,
+  `score --intent <intent>`, or both; intent-scoped coverage uses only prompts
+  assigned to that intent, and the response echoes the active scope.
 - `introspect` (`geiter/introspect-v1`) is read-only and ranks the most valuable
   improvement opportunities by combining coverage gaps, observation health, and the
   weakest coverage-matrix cells, each with the evidence that produced it.

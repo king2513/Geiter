@@ -476,6 +476,7 @@ def execute_cycle(
     surface = SandboxSurface(store.root)
     surface_info = surface.ensure()
     before_score = store.score()
+    before_scope_score = store.score("surface")
     selection = recommend_kind(store) if kind is None else {"kind": kind, "reason": "explicit"}
     execution_baseline = None
     if store.analyze()["metrics"]["sample_size"] >= 2:
@@ -550,6 +551,7 @@ def execute_cycle(
         baseline_id or (execution_baseline or {}).get("id"),
     )
     after_score = store.score()
+    after_scope_score = store.score("surface")
 
     score_before_value = before_score.get("north_star")
     score_after_value = after_score.get("north_star")
@@ -557,6 +559,13 @@ def execute_cycle(
         isinstance(score_before_value, (int, float))
         and isinstance(score_after_value, (int, float))
         and score_after_value < score_before_value
+    )
+    scope_score_before = before_scope_score.get("north_star")
+    scope_score_after = after_scope_score.get("north_star")
+    scope_score_regressed = (
+        isinstance(scope_score_before, (int, float))
+        and isinstance(scope_score_after, (int, float))
+        and scope_score_after < scope_score_before
     )
     comparison = gate.get("comparison", {})
     scope_before = comparison.get("baseline_paired", {}).get("metrics", {})
@@ -567,15 +576,18 @@ def execute_cycle(
     if scope_regressed:
         gate["ok"] = False
         gate.setdefault("failed_checks", []).append("execution_scope")
-    if score_regressed:
+    if score_regressed or scope_score_regressed:
         gate["ok"] = False
-        gate.setdefault("failed_checks", []).append("workspace_score")
+        if score_regressed:
+            gate.setdefault("failed_checks", []).append("workspace_score")
+        if scope_score_regressed:
+            gate.setdefault("failed_checks", []).append("provider_scope_score")
         gate["action"] = {
             "type": "recover_regression",
             "priority": "high",
             "prompt": (
-                "The autonomous change lowered the workspace north-star score; "
-                "inspect the global regression and revert or improve the change."
+                "The autonomous change lowered a protected score scope; "
+                "inspect the regression and revert or improve the change."
             ),
         }
     if not score_regressed and scope_regressed:
@@ -591,6 +603,7 @@ def execute_cycle(
         "gate_ok": gate.get("ok"),
         "gate_failed_checks": gate.get("failed_checks", []),
         "score_regressed": score_regressed,
+        "scope_score_regressed": scope_score_regressed,
         "scope_regressed": scope_regressed,
         "comparison_verdict": scope_verdict,
         "execution_scope": {
@@ -601,6 +614,8 @@ def execute_cycle(
         },
         "score_before": before_score.get("north_star"),
         "score_after": after_score.get("north_star"),
+        "scope_score_before": scope_score_before,
+        "scope_score_after": scope_score_after,
         "gate_action": gate.get("action"),
     }
 

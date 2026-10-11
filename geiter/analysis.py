@@ -23,7 +23,11 @@ class AnalysisMixin:
         ]
         return self._analyze_observations(state, observations)
 
-    def score(self, provider: str | None = None) -> dict[str, Any]:
+    def score(
+        self,
+        provider: str | None = None,
+        intent: str | None = None,
+    ) -> dict[str, Any]:
         """Aggregate retrieval metrics into one direction-safe north-star score.
 
         Every dimension is normalized so that higher is always better, so a rising
@@ -31,17 +35,41 @@ class AnalysisMixin:
         Dimensions with too few samples to be meaningful are reported as
         ``insufficient_data`` instead of being folded into a misleading total.
         """
-        if provider is None:
+        if provider is None and intent is None:
             analysis = self.analyze()
         else:
             state = self.read()
+            prompt_map = {item["id"]: item for item in state["prompts"]}
             observations = [
                 item for item in state["observations"]
                 if item["kind"] == "retrieval.observation"
-                and item["data"].get("provider") == provider
+                and (provider is None or item["data"].get("provider") == provider)
+                and (
+                    intent is None
+                    or prompt_map.get(item["data"].get("prompt_id"), {})
+                    .get("data", {})
+                    .get("intent") == intent
+                )
                 and item["data"].get("quality", {}).get("usable", True)
             ]
             analysis = self._analyze_observations(state, observations)
+            if intent is not None:
+                scoped_prompt_ids = {
+                    item["id"]
+                    for item in state["prompts"]
+                    if item.get("data", {}).get("intent") == intent
+                }
+                observed_prompt_ids = {
+                    item["data"].get("prompt_id")
+                    for item in observations
+                }
+                analysis["coverage"]["prompts"] = len(scoped_prompt_ids)
+                analysis["coverage"]["observed_prompts"] = len(
+                    observed_prompt_ids & scoped_prompt_ids
+                )
+                analysis["coverage"]["unobserved_prompt_ids"] = sorted(
+                    scoped_prompt_ids - observed_prompt_ids
+                )
         metrics = analysis["metrics"]
         coverage = analysis["coverage"]
         sample_size = metrics["sample_size"]
@@ -139,6 +167,7 @@ class AnalysisMixin:
             "dimensions": dimensions,
             "weakest_dimension": weakest_dimension,
             "provider": provider,
+            "intent": intent,
             "weakest_provider": weakest_provider,
             "next_action": next_action,
         }

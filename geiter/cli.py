@@ -78,6 +78,7 @@ def parser() -> argparse.ArgumentParser:
     analyze.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
     score = commands.add_parser("score", help="Compute the north-star GEO score")
     score.add_argument("--provider", help="Limit the score to one provider")
+    score.add_argument("--intent", help="Limit the score to one prompt intent")
     score.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
     introspect = commands.add_parser("introspect", help="Rank evidence-backed improvement opportunities")
     introspect.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
@@ -265,7 +266,7 @@ def main(argv: list[str] | None = None) -> None:
     elif args.command == "analyze":
         result = store.analyze()
     elif args.command == "score":
-        result = store.score(args.provider)
+        result = store.score(args.provider, args.intent)
     elif args.command == "introspect":
         result = store.introspect()
     elif args.command == "health":
