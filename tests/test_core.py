@@ -496,6 +496,23 @@ class GeiterStoreTests(unittest.TestCase):
         rec = recommend_kind(store)
         self.assertEqual(rec["kind"], "append_section")
 
+    def test_recommend_kind_explores_after_all_eligible_strategies_regress(self):
+        store = GeiterStore(self.tempdir.name)
+        store.init()
+        for index in range(2):
+            store.add("learnings", "execution.result", {
+                "change_id": f"failed-{index}",
+                "kind": "append_section",
+                "accepted": False,
+                "verdict": {"score_before": 50.0, "score_after": 40.0},
+            })
+        recommendation = recommend_kind(store)
+        self.assertEqual(recommendation["kind"], "replace_section")
+        self.assertEqual(
+            recommendation["reason"],
+            "explore_untried_change_kind_after_non_positive_history",
+        )
+
     def test_effectiveness_prefers_the_strategy_that_improved(self):
         store = GeiterStore(self.tempdir.name)
         store.init()
@@ -633,6 +650,18 @@ class GeiterStoreTests(unittest.TestCase):
         self.assertTrue(revert["reverted"])
         self.assertEqual(surface.read(), before)
         self.assertTrue(snapshot.exists())
+
+    def test_sandbox_surface_replaces_one_section(self):
+        surface = SandboxSurface(self.tempdir.name)
+        surface.ensure("# Knowledge surface\n\n## Existing\n\nOld text.\n\n## Keep\n\nKeep text.\n")
+
+        surface.replace_section("Existing", "New text.")
+
+        content = surface.read()
+        self.assertIn("## Existing\n\nNew text.", content)
+        self.assertIn("## Keep\n\nKeep text.", content)
+        with self.assertRaisesRegex(ValueError, "section not found"):
+            surface.replace_section("Missing", "Nope")
 
     def test_surface_provider_attributes_entity_in_realistic_markdown(self):
         from geiter.execute import SurfaceProvider
@@ -796,6 +825,26 @@ class GeiterStoreTests(unittest.TestCase):
         ]
         self.assertEqual(len(learnings), 1)
         self.assertEqual(learnings[0]["data"]["change_id"], result["verdict"]["change_id"])
+
+    def test_execute_cycle_records_change_application_failure(self):
+        store = GeiterStore(self.tempdir.name)
+        store.init()
+        surface = SandboxSurface(self.tempdir.name)
+        surface.ensure("# Knowledge surface\n\n## Existing\n\nOld text.\n")
+
+        result = execute_cycle(
+            store,
+            heading="Missing",
+            body="This cannot be applied.",
+            provider_factory=surface_provider_factory(surface, "Geiter"),
+            target="Geiter",
+            kind="replace_section",
+        )
+
+        self.assertFalse(result["verdict"]["accepted"])
+        self.assertEqual(result["verdict"]["gate_failed_checks"], ["change_application"])
+        self.assertIn("section not found", result["verdict"]["error"])
+        self.assertIsNone(result["run"])
 
     def test_prompt_identity_is_deterministic_and_deduplicated(self):
         self.store.init()

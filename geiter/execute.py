@@ -40,6 +40,7 @@ def now_iso() -> str:
 # these learnable: effectiveness aggregates history per kind so later cycles
 # prefer strategies that have actually worked.
 DEFAULT_CHANGE_KIND = "append_section"
+EXPLORATION_CHANGE_KINDS = ("append_section", "replace_section")
 MIN_SAMPLES_FOR_PREFERENCE = 2
 
 
@@ -137,6 +138,18 @@ def recommend_kind(store: GeiterStore) -> dict[str, Any]:
             "reason": "no_change_kind_has_enough_history_yet",
             "experience": report,
         }
+    if all((item["mean_score_delta"] or 0.0) <= 0 for item in eligible):
+        attempted = {item["kind"] for item in report["strategies"]}
+        unexplored = next(
+            (kind for kind in EXPLORATION_CHANGE_KINDS if kind not in attempted),
+            None,
+        )
+        if unexplored:
+            return {
+                "kind": unexplored,
+                "reason": "explore_untried_change_kind_after_non_positive_history",
+                "experience": report,
+            }
     best = eligible[0]
     return {
         "kind": best["kind"],
@@ -215,7 +228,7 @@ class SurfacePolicy:
 SANDBOX_POLICY = SurfacePolicy(
     surface_id="sandbox",
     level=POLICY_AUTO,
-    allowed_kinds={"append_section"},
+    allowed_kinds=set(EXPLORATION_CHANGE_KINDS),
 )
 
 
@@ -316,6 +329,19 @@ class SandboxSurface:
         current = self.read()
         addition = f"\n## {heading}\n\n{body.strip()}\n"
         self.knowledge_path.write_text(current.rstrip() + "\n" + addition, encoding="utf-8")
+        return self.knowledge_path.read_text(encoding="utf-8")
+
+    def replace_section(self, heading: str, body: str) -> str:
+        """Replace one existing Markdown section without touching other sections."""
+        current = self.read()
+        pattern = re.compile(
+            rf"(?ms)^##\s+{re.escape(heading.strip())}\s*$.*?(?=^##\s+|\Z)"
+        )
+        replacement = f"## {heading.strip()}\n\n{body.strip()}\n\n"
+        updated, count = pattern.subn(replacement, current)
+        if count == 0:
+            raise ValueError(f"section not found: {heading.strip()}")
+        self.knowledge_path.write_text(updated.rstrip() + "\n", encoding="utf-8")
         return self.knowledge_path.read_text(encoding="utf-8")
 
     def revert(self, change_id: str) -> dict[str, Any]:
@@ -450,7 +476,55 @@ def execute_cycle(
 
     proposal = propose_change(store, surface, heading, body, kind=selection["kind"])
     snapshot_path = surface.snapshot(proposal.change_id)
-    applied_path = surface.append_section(heading, body)
+    try:
+        if proposal.kind == "replace_section":
+            applied_path = surface.replace_section(heading, body)
+        else:
+            applied_path = surface.append_section(heading, body)
+    except Exception as exc:
+        revert = surface.revert(proposal.change_id)
+        verdict = {
+            "change_id": proposal.change_id,
+            "accepted": False,
+            "gate_ok": False,
+            "gate_failed_checks": ["change_application"],
+            "score_regressed": False,
+            "comparison_verdict": None,
+            "score_before": before_score.get("north_star"),
+            "score_after": before_score.get("north_star"),
+            "gate_action": {
+                "type": "repair_change",
+                "priority": "high",
+                "prompt": "Repair the change proposal so it targets an existing surface section.",
+            },
+            "error": str(exc),
+            "revert": revert,
+        }
+        learning = store.add(
+            "learnings",
+            "execution.result",
+            {
+                "change_id": proposal.change_id,
+                "kind": proposal.kind,
+                "accepted": False,
+                "rationale": proposal.rationale,
+                "evidence": proposal.evidence,
+                "verdict": verdict,
+            },
+        )
+        return {
+            "schema": "geiter/execution-v1",
+            "surface": surface_info,
+            "strategy": selection,
+            "proposal": proposal.to_dict(),
+            "execution_baseline": execution_baseline,
+            "applied_path": None,
+            "run": None,
+            "gate": None,
+            "verdict": verdict,
+            "learning_id": learning["id"],
+            "next_action": "Change application failed; repair the proposal and retry.",
+        }
     store.event(
         "changes.applied",
         {"change_id": proposal.change_id, "snapshot": str(snapshot_path)},
