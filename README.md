@@ -275,6 +275,10 @@ introspect -> propose change -> snapshot -> apply -> re-observe -> gate
            -> accept (keep the change) or revert (roll it back)
 ```
 
+The built-in `cite_target` strategy adds explicit source material and is useful
+when introspection identifies target-citation as the weakest signal. A target
+mention alone is not treated as attributable evidence by the surface provider.
+
 The regression gate is the arbiter. A change is kept only when the evidence
 gate accepts it; if the gate rejects the change, the surface is restored from the
 snapshot taken before the change and the outcome is recorded as a learning. This

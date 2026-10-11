@@ -244,7 +244,11 @@ gateway tools `geiter_score` and `geiter_introspect`, and the resources
 ## Autonomous execution
 
 `execute` returns a `geiter/execution-v1` object and runs one verified change
-cycle:
+cycle. Supported change kinds include `append_section`, `replace_section`, and
+`cite_target`; the citation strategy adds explicit `Source:` material so the
+surface provider can distinguish attributable evidence from a bare mention.
+The provider only emits a target evidence citation when the live surface
+contains source, evidence, citation, or reference language.
 
 1. `propose` derives a change from `introspect`, so it is grounded in evidence.
 2. `snapshot` records the current surface so the change is reversible.
