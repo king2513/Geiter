@@ -901,6 +901,27 @@ class GeiterStoreTests(unittest.TestCase):
         self.assertLess(weak["north_star"], strong["north_star"])
         self.assertEqual(weak["weakest_dimension"], "target_citation")
 
+    def test_score_can_be_scoped_to_a_provider(self):
+        self.store.init()
+        prompts = [
+            self.store.add_prompt("What is Geiter?", "discovery"),
+            self.store.add_prompt("Why use Geiter?", "evaluation"),
+        ]
+        for prompt in prompts:
+            self.store.record_observation(
+                prompt["id"], "strong", "Geiter is useful.", ["https://geiter.dev/docs"]
+            )
+            self.store.record_observation(
+                prompt["id"], "weak", "Geiter is mentioned.", []
+            )
+
+        strong = self.store.score("strong")
+        weak = self.store.score("weak")
+
+        self.assertEqual(strong["provider"], "strong")
+        self.assertEqual(weak["provider"], "weak")
+        self.assertGreater(strong["north_star"], weak["north_star"])
+
     def test_introspect_ranks_evidence_backed_opportunities(self):
         self.store.init()
         prompt_a = self.store.add_prompt("What is Geiter?", "discovery")
@@ -916,6 +937,7 @@ class GeiterStoreTests(unittest.TestCase):
             opportunities["observe_uncovered_prompts"]["evidence"]["unobserved_prompt_ids"],
         )
         self.assertEqual(result["opportunities"][0]["priority"], "high")
+        self.assertIn("provider_scores", result)
 
     def test_observation_metrics_and_analysis(self):
         self.store.init()
@@ -999,6 +1021,14 @@ class GeiterStoreTests(unittest.TestCase):
             },
         )
         self.assertEqual(json.loads(response["result"]["content"][0]["text"])["kind"], "prompt")
+
+    def test_gateway_score_accepts_provider_scope(self):
+        self.store.init()
+        listed = dispatch(self.store, {"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+        score_tool = next(
+            item for item in listed["result"]["tools"] if item["name"] == "geiter_score"
+        )
+        self.assertIn("provider", score_tool["inputSchema"]["properties"])
 
     def test_gateway_advertises_capabilities_and_rejects_invalid_requests(self):
         self.store.init()

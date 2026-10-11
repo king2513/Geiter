@@ -23,7 +23,7 @@ class AnalysisMixin:
         ]
         return self._analyze_observations(state, observations)
 
-    def score(self) -> dict[str, Any]:
+    def score(self, provider: str | None = None) -> dict[str, Any]:
         """Aggregate retrieval metrics into one direction-safe north-star score.
 
         Every dimension is normalized so that higher is always better, so a rising
@@ -31,7 +31,17 @@ class AnalysisMixin:
         Dimensions with too few samples to be meaningful are reported as
         ``insufficient_data`` instead of being folded into a misleading total.
         """
-        analysis = self.analyze()
+        if provider is None:
+            analysis = self.analyze()
+        else:
+            state = self.read()
+            observations = [
+                item for item in state["observations"]
+                if item["kind"] == "retrieval.observation"
+                and item["data"].get("provider") == provider
+                and item["data"].get("quality", {}).get("usable", True)
+            ]
+            analysis = self._analyze_observations(state, observations)
         metrics = analysis["metrics"]
         coverage = analysis["coverage"]
         sample_size = metrics["sample_size"]
@@ -93,6 +103,7 @@ class AnalysisMixin:
             "sample_size": sample_size,
             "dimensions": dimensions,
             "weakest_dimension": weakest_dimension,
+            "provider": provider,
             "next_action": (
                 f"Improve the weakest dimension '{weakest_dimension}' before expanding coverage."
                 if weakest_dimension and sufficient
@@ -112,6 +123,10 @@ class AnalysisMixin:
         analysis = self.analyze()
         health = self.health()
         matrix = self.analyze_matrix()
+        provider_scores = {
+            provider: self.score(provider)
+            for provider in sorted({cell["provider"] for cell in matrix["cells"]})
+        }
         opportunities: list[dict[str, Any]] = []
 
         unobserved = analysis["coverage"]["unobserved_prompt_ids"]
@@ -183,6 +198,7 @@ class AnalysisMixin:
                 "north_star": score["north_star"],
                 "weakest_dimension": score["weakest_dimension"],
             },
+            "provider_scores": provider_scores,
             "next_action": (
                 opportunities[0]["detail"] if opportunities
                 else "No structural gaps detected; expand prompt and provider coverage."

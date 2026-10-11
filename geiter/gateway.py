@@ -59,7 +59,10 @@ TOOLS = [
     {
         "name": "geiter_score",
         "description": "Compute the direction-safe north-star GEO score and weakest dimension.",
-        "inputSchema": {"type": "object", "properties": {}},
+        "inputSchema": {
+            "type": "object",
+            "properties": {"provider": {"type": "string"}},
+        },
     },
     {
         "name": "geiter_introspect",
@@ -451,7 +454,7 @@ def dispatch(store: GeiterStore, request: dict[str, Any]) -> dict[str, Any] | No
         elif name == "geiter_analyze":
             value = store.analyze()
         elif name == "geiter_score":
-            value = store.score()
+            value = store.score(args.get("provider"))
         elif name == "geiter_introspect":
             value = store.introspect()
         elif name == "geiter_execute":
