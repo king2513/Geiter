@@ -59,6 +59,7 @@ def effectiveness(store: GeiterStore) -> dict[str, Any]:
             "attempts": 0,
             "accepted": 0,
             "reverted": 0,
+            "invalid_accepts": 0,
             "score_deltas": [],
             "weakest_dimensions": [],
         }
@@ -72,12 +73,19 @@ def effectiveness(store: GeiterStore) -> dict[str, Any]:
         bucket = buckets[kind]
         bucket["kind"] = kind
         bucket["attempts"] += 1
-        if data.get("accepted"):
+        before = verdict.get("score_before")
+        after = verdict.get("score_after")
+        score_regressed = (
+            isinstance(before, (int, float))
+            and isinstance(after, (int, float))
+            and after < before
+        )
+        effective_accept = bool(data.get("accepted")) and not score_regressed
+        if effective_accept:
             bucket["accepted"] += 1
         else:
             bucket["reverted"] += 1
-        before = verdict.get("score_before")
-        after = verdict.get("score_after")
+            bucket["invalid_accepts"] += int(bool(data.get("accepted")) and score_regressed)
         if isinstance(before, (int, float)) and isinstance(after, (int, float)):
             bucket["score_deltas"].append(round(after - before, 4))
         weakest = (data.get("evidence") or {}).get("weakest_dimension")

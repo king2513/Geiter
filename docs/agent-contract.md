@@ -283,8 +283,11 @@ Every executed change writes an `execution.result` learning containing the
 change kind, whether it was accepted, and the north-star score before and after.
 `experience` (`geiter/experience-v1`) aggregates that log into a durable
 playbook. For each change kind it reports `attempts`, `accepted`, `reverted`,
-`accept_rate`, `mean_score_delta`, `improved_count`, `regressed_count`, and
-whether the kind is `preference_eligible`. It also returns a `recommendation`
+`invalid_accepts`, `accept_rate`, `mean_score_delta`, `improved_count`,
+`regressed_count`, and whether the kind is `preference_eligible`. An
+execution marked accepted while its north-star score decreased is counted as
+an `invalid_accepts` compatibility record and is not eligible as a successful
+strategy sample. It also returns a `recommendation`
 naming the change kind the next cycle should use.
 
 When `execute` does not receive an explicit change kind, it selects one from

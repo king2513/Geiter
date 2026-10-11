@@ -521,6 +521,9 @@ class GeiterStoreTests(unittest.TestCase):
         self.assertEqual(by_kind["good_kind"]["mean_score_delta"], 15.0)
         self.assertEqual(by_kind["good_kind"]["improved_count"], 2)
         self.assertEqual(by_kind["good_kind"]["regressed_count"], 0)
+        self.assertEqual(by_kind["bad_kind"]["accepted"], 0)
+        self.assertEqual(by_kind["bad_kind"]["invalid_accepts"], 1)
+        self.assertEqual(by_kind["bad_kind"]["accept_rate"], 0.0)
         self.assertEqual(by_kind["bad_kind"]["regressed_count"], 1)
         # It prefers the strategy that actually improved the score.
         self.assertEqual(recommend_kind(store)["kind"], "good_kind")
