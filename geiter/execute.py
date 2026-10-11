@@ -645,12 +645,7 @@ def execution_history(store: GeiterStore, limit: int = 20) -> dict[str, Any]:
         if isinstance(before, (int, float)) and isinstance(after, (int, float)):
             deltas.append(round(after - before, 4))
     recent_failures = [
-        {
-            "change_id": item.get("data", {}).get("change_id"),
-            "kind": item.get("data", {}).get("kind"),
-            "gate_action": item.get("data", {}).get("verdict", {}).get("gate_action"),
-            "failed_checks": item.get("data", {}).get("verdict", {}).get("gate_failed_checks", []),
-        }
+        _execution_failure_summary(item)
         for item in recent
         if not item.get("data", {}).get("accepted")
     ]
@@ -682,6 +677,36 @@ def execution_history(store: GeiterStore, limit: int = 20) -> dict[str, Any]:
             if recent_failures
             else "Execution history is healthy; continue with the evidence-guided strategy."
         ),
+    }
+
+
+def _execution_failure_summary(item: dict[str, Any]) -> dict[str, Any]:
+    """Normalize a reverted execution into one agent-selectable recovery signal."""
+    verdict = item.get("data", {}).get("verdict", {})
+    failed_checks = verdict.get("gate_failed_checks", [])
+    comparison_verdict = verdict.get("comparison_verdict")
+    if "workspace_score" in failed_checks or verdict.get("score_regressed"):
+        failure_class = "workspace_regression"
+        recovery = "Change the proposal so the global north-star score does not decrease."
+    elif comparison_verdict in {"regressed", "mixed"}:
+        failure_class = "gate_regression"
+        recovery = "Repair the losing GEO dimension, then rerun against the same baseline."
+    elif comparison_verdict == "insufficient_data" or "baseline_comparison" in failed_checks:
+        failure_class = "insufficient_evidence"
+        recovery = "Collect at least two valid same-provider prompt pairs before retrying."
+    elif any(check in failed_checks for check in ("run_completed", "observations_usable")):
+        failure_class = "provider_or_observation"
+        recovery = "Repair provider attempts or unusable observations before retrying."
+    else:
+        failure_class = "gate_rejected"
+        recovery = "Inspect the gate action and retry only after addressing its evidence."
+    return {
+        "change_id": item.get("data", {}).get("change_id"),
+        "kind": item.get("data", {}).get("kind"),
+        "failure_class": failure_class,
+        "recovery": recovery,
+        "gate_action": verdict.get("gate_action"),
+        "failed_checks": failed_checks,
     }
 
 

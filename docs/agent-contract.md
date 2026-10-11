@@ -106,7 +106,14 @@ It also exposes `geiter://status` and `geiter://report` resources through
 `geiter/execution-history-v1` read-only summary. It reports accepted and
 reverted verified changes, bounded recent outcomes, score deltas, and recent
 gate failures without requiring agents to interpret raw `execution.result`
-learnings.
+learnings. Each `recent_failures[]` item also includes a stable
+`failure_class` and `recovery` hint:
+
+- `insufficient_evidence`: same-provider before/after pairs are not sufficient.
+- `workspace_regression`: the global north-star score decreased.
+- `gate_regression`: paired GEO metrics regressed or mixed.
+- `provider_or_observation`: the run or observation evidence is unusable.
+- `gate_rejected`: a gate-specific failure that does not match the above.
 
 ## Stability rules
 
