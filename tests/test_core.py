@@ -749,6 +749,8 @@ class GeiterStoreTests(unittest.TestCase):
         self.assertTrue(result["gate"]["ok"])
         self.assertEqual(result["gate"]["comparison"]["pairing"]["pair_count"], 2)
         self.assertEqual(result["execution_baseline"]["id"], result["gate"]["baseline_id"])
+        self.assertEqual(result["verdict"]["execution_scope"]["verdict"], "flat")
+        self.assertFalse(result["verdict"]["scope_regressed"])
 
     def test_execute_cycle_reverts_when_workspace_score_regresses(self):
         store = GeiterStore(self.tempdir.name)
@@ -778,6 +780,7 @@ class GeiterStoreTests(unittest.TestCase):
         self.assertFalse(result["verdict"]["accepted"])
         self.assertTrue(result["verdict"]["score_regressed"])
         self.assertIn("workspace_score", result["verdict"]["gate_failed_checks"])
+        self.assertIn("execution_scope", result["verdict"])
         self.assertTrue(result["verdict"]["revert"]["reverted"])
         self.assertEqual(surface.read(), before)
 

@@ -558,6 +558,15 @@ def execute_cycle(
         and isinstance(score_after_value, (int, float))
         and score_after_value < score_before_value
     )
+    comparison = gate.get("comparison", {})
+    scope_before = comparison.get("baseline_paired", {}).get("metrics", {})
+    scope_after = comparison.get("current", {}).get("metrics", {})
+    scope_delta = comparison.get("delta", {})
+    scope_verdict = comparison.get("verdict")
+    scope_regressed = scope_verdict in {"regressed", "mixed"}
+    if scope_regressed:
+        gate["ok"] = False
+        gate.setdefault("failed_checks", []).append("execution_scope")
     if score_regressed:
         gate["ok"] = False
         gate.setdefault("failed_checks", []).append("workspace_score")
@@ -569,6 +578,12 @@ def execute_cycle(
                 "inspect the global regression and revert or improve the change."
             ),
         }
+    if not score_regressed and scope_regressed:
+        gate["action"] = {
+            "type": "recover_regression",
+            "priority": "high",
+            "prompt": "The execution-scope GEO metrics regressed; repair the change and rerun it.",
+        }
     accepted = bool(gate.get("ok"))
     verdict = {
         "change_id": proposal.change_id,
@@ -576,7 +591,14 @@ def execute_cycle(
         "gate_ok": gate.get("ok"),
         "gate_failed_checks": gate.get("failed_checks", []),
         "score_regressed": score_regressed,
-        "comparison_verdict": gate.get("comparison", {}).get("verdict"),
+        "scope_regressed": scope_regressed,
+        "comparison_verdict": scope_verdict,
+        "execution_scope": {
+            "before": scope_before,
+            "after": scope_after,
+            "delta": scope_delta,
+            "verdict": scope_verdict,
+        },
         "score_before": before_score.get("north_star"),
         "score_after": after_score.get("north_star"),
         "gate_action": gate.get("action"),
