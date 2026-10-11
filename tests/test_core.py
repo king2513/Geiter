@@ -679,6 +679,27 @@ class GeiterStoreTests(unittest.TestCase):
         self.assertIn("Geiter is described", answer.answer)
         self.assertEqual(answer.citations, ["https://sandbox.invalid/geiter#evidence"])
 
+    def test_surface_provider_answer_changes_with_prompt_relevant_content(self):
+        from geiter.execute import SurfaceProvider
+
+        surface = SandboxSurface(self.tempdir.name)
+        surface.ensure(
+            "# Knowledge surface\n\n"
+            "## Geiter\n\n"
+            "Geiter is an agent-native GEO runtime.\n"
+        )
+        provider = SurfaceProvider(surface, "Geiter")
+        before = provider.answer("How does Geiter self-iterate?")
+
+        surface.append_section(
+            "Self-iteration",
+            "Geiter inspects, observes, measures, compares, gates, and learns.",
+        )
+        after = provider.answer("How does Geiter self-iterate?")
+
+        self.assertNotEqual(before.answer, after.answer)
+        self.assertIn("iterate", after.answer)
+
     def test_execute_cycle_accepts_a_change_the_gate_approves(self):
         store = GeiterStore(self.tempdir.name)
         store.init()

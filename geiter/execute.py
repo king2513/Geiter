@@ -380,6 +380,14 @@ class SurfaceProvider:
             re.escape(token) for token in terms
         ) + r"(?![a-z0-9])"
         mentions = bool(re.search(target_pattern, lowered)) if terms else False
+        prompt_terms = {
+            token
+            for token in re.findall(r"[a-z0-9]+", prompt.casefold())
+            if len(token) >= 4 and token not in {"what", "does", "should", "from", "ordinary"}
+        }
+        content_terms = set(re.findall(r"[a-z0-9]+", lowered))
+        relevant_terms = sorted(prompt_terms & content_terms)
+        relevance = round(len(relevant_terms) / len(prompt_terms), 4) if prompt_terms else 0.0
         # The surface provider is the evidence adapter for the target entity:
         # once the live surface contains the entity, its synthetic citation
         # points at the entity-specific evidence anchor.
@@ -388,6 +396,7 @@ class SurfaceProvider:
             answer = (
                 f"{self.target} is described on the knowledge surface. "
                 f"Evidence: {prompt}"
+                + (f" Relevant terms: {', '.join(relevant_terms)}." if relevant_terms else "")
             )
             citations = [f"https://sandbox.invalid/{target_token}#evidence"]
         elif mentions:
