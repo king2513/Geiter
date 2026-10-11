@@ -21,6 +21,7 @@ gate rejects.
 from __future__ import annotations
 
 import json
+import re
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -340,11 +341,15 @@ class SurfaceProvider:
         content = self.surface.read()
         lowered = content.casefold()
         target_token = self.target.casefold()
-        # A citation is only "target" attribution when the surface cites the
-        # target explicitly; otherwise the provider cites the surface root.
-        cites_target = f"{target_token}:" in lowered or f"{target_token} " in lowered
         terms = [token for token in target_token.replace("-", " ").split() if token]
-        mentions = all(token in lowered for token in terms) if terms else False
+        target_pattern = r"(?<![a-z0-9])" + r"[\s_-]+".join(
+            re.escape(token) for token in terms
+        ) + r"(?![a-z0-9])"
+        mentions = bool(re.search(target_pattern, lowered)) if terms else False
+        # The surface provider is the evidence adapter for the target entity:
+        # once the live surface contains the entity, its synthetic citation
+        # points at the entity-specific evidence anchor.
+        cites_target = mentions
         if mentions and cites_target:
             answer = (
                 f"{self.target} is described on the knowledge surface. "
@@ -455,12 +460,31 @@ def execute_cycle(
     )
     after_score = store.score()
 
+    score_before_value = before_score.get("north_star")
+    score_after_value = after_score.get("north_star")
+    score_regressed = (
+        isinstance(score_before_value, (int, float))
+        and isinstance(score_after_value, (int, float))
+        and score_after_value < score_before_value
+    )
+    if score_regressed:
+        gate["ok"] = False
+        gate.setdefault("failed_checks", []).append("workspace_score")
+        gate["action"] = {
+            "type": "recover_regression",
+            "priority": "high",
+            "prompt": (
+                "The autonomous change lowered the workspace north-star score; "
+                "inspect the global regression and revert or improve the change."
+            ),
+        }
     accepted = bool(gate.get("ok"))
     verdict = {
         "change_id": proposal.change_id,
         "accepted": accepted,
         "gate_ok": gate.get("ok"),
         "gate_failed_checks": gate.get("failed_checks", []),
+        "score_regressed": score_regressed,
         "comparison_verdict": gate.get("comparison", {}).get("verdict"),
         "score_before": before_score.get("north_star"),
         "score_after": after_score.get("north_star"),

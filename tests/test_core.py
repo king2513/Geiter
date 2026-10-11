@@ -629,6 +629,22 @@ class GeiterStoreTests(unittest.TestCase):
         self.assertEqual(surface.read(), before)
         self.assertTrue(snapshot.exists())
 
+    def test_surface_provider_attributes_entity_in_realistic_markdown(self):
+        from geiter.execute import SurfaceProvider
+
+        surface = SandboxSurface(self.tempdir.name)
+        surface.ensure(
+            "# Knowledge surface\n\n"
+            "## Geiter agent-first identity.\n\n"
+            "Geiter is an agent-native GEO runtime.\n"
+        )
+        provider = SurfaceProvider(surface, "Geiter")
+
+        answer = provider.answer("What is Geiter?")
+
+        self.assertIn("Geiter is described", answer.answer)
+        self.assertEqual(answer.citations, ["https://sandbox.invalid/geiter#evidence"])
+
     def test_execute_cycle_accepts_a_change_the_gate_approves(self):
         store = GeiterStore(self.tempdir.name)
         store.init()
@@ -678,6 +694,37 @@ class GeiterStoreTests(unittest.TestCase):
         self.assertTrue(result["gate"]["ok"])
         self.assertEqual(result["gate"]["comparison"]["pairing"]["pair_count"], 2)
         self.assertEqual(result["execution_baseline"]["id"], result["gate"]["baseline_id"])
+
+    def test_execute_cycle_reverts_when_workspace_score_regresses(self):
+        store = GeiterStore(self.tempdir.name)
+        store.init()
+        target = store.read()["identity"]["name"]
+        prompt_a = store.add_prompt("What is Geiter?", "discovery")
+        prompt_b = store.add_prompt("Why use Geiter?", "evaluation")
+        for prompt in (prompt_a, prompt_b):
+            store.record_observation(
+                prompt["id"],
+                "fixture",
+                f"{target} is an agent-native GEO runtime.",
+                ["https://geiter.dev/docs"],
+            )
+        surface = SandboxSurface(self.tempdir.name)
+        surface.ensure()
+        before = surface.read()
+
+        result = execute_cycle(
+            store,
+            heading="Generic content",
+            body="This generic section does not mention the target entity.",
+            provider_factory=surface_provider_factory(surface, target),
+            target=target,
+        )
+
+        self.assertFalse(result["verdict"]["accepted"])
+        self.assertTrue(result["verdict"]["score_regressed"])
+        self.assertIn("workspace_score", result["verdict"]["gate_failed_checks"])
+        self.assertTrue(result["verdict"]["revert"]["reverted"])
+        self.assertEqual(surface.read(), before)
 
     def test_execute_cycle_uses_execution_baseline_when_external_baseline_is_stale(self):
         store = GeiterStore(self.tempdir.name)
