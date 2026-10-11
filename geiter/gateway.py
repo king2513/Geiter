@@ -86,6 +86,14 @@ TOOLS = [
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
+        "name": "geiter_execution_history",
+        "description": "Read bounded autonomous execution outcomes and recent reverts.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"limit": {"type": "integer", "minimum": 1}},
+        },
+    },
+    {
         "name": "geiter_govern",
         "description": "Propose a governed change for a surface policy; returns denied, pending_approval, or executed.",
         "inputSchema": {
@@ -335,6 +343,12 @@ RESOURCES = [
         "mimeType": "application/json",
     },
     {
+        "uri": "geiter://execution-history",
+        "name": "Geiter execution history",
+        "description": "Verified autonomous execution outcomes and recent reverts.",
+        "mimeType": "application/json",
+    },
+    {
         "uri": "geiter://capabilities",
         "name": "Geiter capabilities",
         "description": "Stable version, transport, schema, and agent entrypoint metadata.",
@@ -405,6 +419,10 @@ def dispatch(store: GeiterStore, request: dict[str, Any]) -> dict[str, Any] | No
             from .execute import experience
 
             value = experience(store)
+        elif uri == "geiter://execution-history":
+            from .execute import execution_history
+
+            value = execution_history(store)
         elif uri == "geiter://capabilities":
             value = store.capabilities()
         else:
@@ -453,6 +471,10 @@ def dispatch(store: GeiterStore, request: dict[str, Any]) -> dict[str, Any] | No
             from .execute import experience
 
             value = experience(store)
+        elif name == "geiter_execution_history":
+            from .execute import execution_history
+
+            value = execution_history(store, args.get("limit", 20))
         elif name == "geiter_govern":
             from .execute import (
                 SandboxSurface,

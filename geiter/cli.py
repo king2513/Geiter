@@ -156,6 +156,12 @@ def parser() -> argparse.ArgumentParser:
         "experience",
         help="Show the compounding playbook of historical change effectiveness",
     ).add_argument("--json", action="store_true", help=argparse.SUPPRESS)
+    execution_history = commands.add_parser(
+        "execution-history",
+        help="Show verified autonomous execution outcomes",
+    )
+    execution_history.add_argument("--limit", type=int, default=20)
+    execution_history.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
 
     goal = commands.add_parser("goal", help="Manage goals")
     goal.add_argument("action", choices=("add", "list"))
@@ -372,6 +378,10 @@ def main(argv: list[str] | None = None) -> None:
             )
     elif args.command == "experience":
         result = experience(store)
+    elif args.command == "execution-history":
+        from .execute import execution_history
+
+        result = execution_history(store, args.limit)
     elif args.command == "goal":
         if args.action == "add":
             if not args.text:

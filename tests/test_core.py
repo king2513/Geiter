@@ -23,6 +23,7 @@ from geiter.execute import (
     decide_approval,
     effectiveness,
     execute_cycle,
+    execution_history,
     execute_governed,
     experience,
     list_approvals,
@@ -546,6 +547,39 @@ class GeiterStoreTests(unittest.TestCase):
         self.assertEqual(bounded["total_executions"], 2)
         self.assertEqual(bounded["top_strategy"]["kind"], "cite_target")
         self.assertEqual(store.context()["self_assessment"]["experience"]["total_executions"], 2)
+
+    def test_execution_history_is_bounded_and_reports_reverts(self):
+        store = GeiterStore(self.tempdir.name)
+        store.init()
+        empty = execution_history(store)
+        self.assertEqual(empty["schema"], "geiter/execution-history-v1")
+        self.assertEqual(empty["status"], "no_executions")
+        store.add("learnings", "execution.result", {
+            "change_id": "accepted-1",
+            "kind": "append_section",
+            "accepted": True,
+            "verdict": {"score_before": 10, "score_after": 20, "gate_failed_checks": []},
+        })
+        store.add("learnings", "execution.result", {
+            "change_id": "reverted-1",
+            "kind": "append_section",
+            "accepted": False,
+            "verdict": {
+                "score_before": 20,
+                "score_after": 15,
+                "gate_failed_checks": ["baseline_comparison"],
+                "gate_action": {"type": "recover_regression"},
+            },
+        })
+        result = execution_history(store, limit=1)
+        self.assertEqual(result["total_executions"], 2)
+        self.assertEqual(result["accepted"], 1)
+        self.assertEqual(result["reverted"], 1)
+        self.assertEqual(result["mean_score_delta"], 2.5)
+        self.assertEqual(len(result["recent"]), 1)
+        self.assertEqual(result["recent_failures"][0]["change_id"], "reverted-1")
+        with self.assertRaisesRegex(ValueError, "positive integer"):
+            execution_history(store, 0)
 
     def test_execute_cycle_uses_learned_strategy_by_default(self):
         store = GeiterStore(self.tempdir.name)
@@ -1354,6 +1388,7 @@ class GeiterStoreTests(unittest.TestCase):
                 "geiter://score",
                 "geiter://introspect",
                 "geiter://experience",
+                "geiter://execution-history",
             },
         )
         read = dispatch(self.store, {
@@ -1388,6 +1423,28 @@ class GeiterStoreTests(unittest.TestCase):
             "params": {"uri": "geiter://score"},
         })
         self.assertEqual(read["result"]["contents"][0]["uri"], "geiter://score")
+
+    def test_execution_history_is_exposed_through_gateway_and_context(self):
+        self.store.init()
+        listed = dispatch(self.store, {"jsonrpc": "2.0", "id": 44, "method": "tools/list"})
+        names = {tool["name"] for tool in listed["result"]["tools"]}
+        self.assertIn("geiter_execution_history", names)
+        response = dispatch(self.store, {
+            "jsonrpc": "2.0", "id": 45, "method": "tools/call",
+            "params": {"name": "geiter_execution_history", "arguments": {"limit": 2}},
+        })
+        payload = json.loads(response["result"]["content"][0]["text"])
+        self.assertEqual(payload["schema"], "geiter/execution-history-v1")
+        resource = dispatch(self.store, {
+            "jsonrpc": "2.0", "id": 46, "method": "resources/read",
+            "params": {"uri": "geiter://execution-history"},
+        })
+        self.assertEqual(
+            json.loads(resource["result"]["contents"][0]["text"])["schema"],
+            "geiter/execution-history-v1",
+        )
+        context = self.store.context()
+        self.assertIn("execution_history", context["self_assessment"])
 
     def test_gateway_execute_runs_a_verified_cycle(self):
         self.store.init()

@@ -38,6 +38,7 @@ govern approve <request-id> [--approver <who>] --json
 govern reject <request-id> [--approver <who>] --json
 govern list --json
 experience --json
+execution-history [--limit <n>] --json
 action list [--status <open|in_progress|completed|skipped|stale|all>] --json
 action propose --type <type> --prompt <text> [--priority <normal|high|critical>] [--source <source>] [--dedupe-key <key>] --json
 action complete <action-id> --evidence <text> --json
@@ -100,6 +101,12 @@ its own. `geiter_iterate` also reclaims stale actions before claiming the next
 priority action, and records claim conflicts in its iteration result.
 It also exposes `geiter://status` and `geiter://report` resources through
 `resources/list` and `resources/read`.
+
+`execution-history` and `geiter_execution_history` expose the
+`geiter/execution-history-v1` read-only summary. It reports accepted and
+reverted verified changes, bounded recent outcomes, score deltas, and recent
+gate failures without requiring agents to interpret raw `execution.result`
+learnings.
 
 ## Stability rules
 

@@ -593,6 +593,65 @@ def experience(store: GeiterStore) -> dict[str, Any]:
     }
 
 
+def execution_history(store: GeiterStore, limit: int = 20) -> dict[str, Any]:
+    """Summarize verified execution outcomes for agent callers."""
+    if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
+        raise ValueError("execution history limit must be a positive integer")
+    learnings = [
+        item for item in store.read().get("learnings", [])
+        if item.get("kind") == "execution.result"
+    ]
+    recent = learnings[-limit:]
+    accepted = sum(bool(item.get("data", {}).get("accepted")) for item in learnings)
+    reverted = len(learnings) - accepted
+    deltas = []
+    for item in learnings:
+        verdict = item.get("data", {}).get("verdict", {})
+        before = verdict.get("score_before")
+        after = verdict.get("score_after")
+        if isinstance(before, (int, float)) and isinstance(after, (int, float)):
+            deltas.append(round(after - before, 4))
+    recent_failures = [
+        {
+            "change_id": item.get("data", {}).get("change_id"),
+            "kind": item.get("data", {}).get("kind"),
+            "gate_action": item.get("data", {}).get("verdict", {}).get("gate_action"),
+            "failed_checks": item.get("data", {}).get("verdict", {}).get("gate_failed_checks", []),
+        }
+        for item in recent
+        if not item.get("data", {}).get("accepted")
+    ]
+    return {
+        "schema": "geiter/execution-history-v1",
+        "generated_at": now_iso(),
+        "total_executions": len(learnings),
+        "accepted": accepted,
+        "reverted": reverted,
+        "accept_rate": round(accepted / len(learnings), 4) if learnings else None,
+        "mean_score_delta": round(sum(deltas) / len(deltas), 4) if deltas else None,
+        "recent": recent,
+        "recent_failures": recent_failures,
+        "experience": {
+            "recommendation": recommend_kind(store),
+            "strategy_count": effectiveness(store)["strategy_count"],
+        },
+        "status": (
+            "no_executions"
+            if not learnings
+            else "healthy"
+            if not recent_failures
+            else "has_reverted_changes"
+        ),
+        "next_action": (
+            "Run a first verified execution cycle."
+            if not learnings
+            else "Review recent reverted changes before repeating the same strategy."
+            if recent_failures
+            else "Execution history is healthy; continue with the evidence-guided strategy."
+        ),
+    }
+
+
 def execute_governed(
     store: GeiterStore,
     surface_id: str,

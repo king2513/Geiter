@@ -37,6 +37,7 @@ Geiter is an agent-native runtime for Generative Engine Optimization (GEO). It g
 - a surface policy gate where anything but the sandbox defaults to requiring human approval
 - a durable approval workflow so governed changes wait for a named approver before touching a real surface
 - a compounding playbook that learns which change strategies actually improve the score
+- bounded execution history with accepted/reverted outcome summaries
 - evidence-aware `iterate` cycles that consume comparisons and pending experiments
 - persistent prioritized agent action queue with evidence-backed completion
 - agent-proposed actions with deduplication and explicit priorities
@@ -77,6 +78,7 @@ python -m geiter govern approve <request-id> --approver alice --json
 python -m geiter govern reject <request-id> --approver alice --json
 python -m geiter govern list --json
 python -m geiter experience --json
+python -m geiter execution-history --json
 python -m geiter action propose --type investigate --prompt "Check the weakest citation cell" --priority high --json
 python -m geiter action list --json
 python -m geiter action list --status stale --json
@@ -255,6 +257,11 @@ Geiter can answer two questions an agent needs before choosing its next move:
 
 Both are read-only, are exposed through the CLI, the gateway, and MCP-style
 resources, and surface a bounded form in the agent bootstrap context.
+
+`execution-history` (`geiter/execution-history-v1`) summarizes verified
+autonomous changes, accepted versus reverted outcomes, score deltas, and recent
+gate failures. It is read-only and bounded so an agent can inspect execution
+health without parsing the full learning ledger.
 
 ## Autonomous execution
 

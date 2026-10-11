@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.27.0 - 2026-10-11
+
+- added the read-only `geiter/execution-history-v1` surface for verified
+  autonomous execution outcomes
+- exposed bounded accepted/reverted summaries through the CLI, gateway,
+  resource, report, and agent context
+- preserved the existing learning ledger and execution cycle contract
+
 ## 1.26.2 - 2026-10-10
 
 - aligned the stdio gateway success envelopes with MCP JSON-RPC semantics

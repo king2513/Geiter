@@ -359,7 +359,9 @@ class AnalysisMixin:
             "analysis": analysis,
             "score": self.score(),
             "introspect": self.introspect(),
-            "experience": self._experience_bounded(),            "matrix": self.analyze_matrix(),
+            "experience": self._experience_bounded(),
+            "execution_history": self._execution_history_bounded(),
+            "matrix": self.analyze_matrix(),
             "health": self.health(),
             "doctor": doctor,
             "latest_gate": latest_gate,
@@ -414,6 +416,25 @@ class AnalysisMixin:
             "strategy_count": report["strategy_count"],
             "top_strategy": report["strategies"][0] if report["strategies"] else None,
             "recommendation": report["recommendation"],
+        }
+
+    def _execution_history_bounded(self) -> dict[str, Any]:
+        """Return a bounded execution summary without exposing all learnings."""
+        try:
+            from .execute import execution_history
+
+            report = execution_history(self, limit=5)
+        except Exception:  # pragma: no cover - reporting must remain resilient
+            return {"status": "unavailable", "total_executions": 0, "recent_failures": []}
+        return {
+            "status": report["status"],
+            "total_executions": report["total_executions"],
+            "accepted": report["accepted"],
+            "reverted": report["reverted"],
+            "accept_rate": report["accept_rate"],
+            "mean_score_delta": report["mean_score_delta"],
+            "recent_failures": report["recent_failures"],
+            "next_action": report["next_action"],
         }
 
     @staticmethod
