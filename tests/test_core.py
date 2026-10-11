@@ -618,6 +618,7 @@ class GeiterStoreTests(unittest.TestCase):
         self.assertEqual(result["recent_failures"][0]["change_id"], "reverted-1")
         self.assertEqual(result["recent_failures"][0]["failure_class"], "insufficient_evidence")
         self.assertIn("same-provider", result["recent_failures"][0]["recovery"])
+        self.assertEqual(result["failure_classes"], {"insufficient_evidence": 1})
         with self.assertRaisesRegex(ValueError, "positive integer"):
             execution_history(store, 0)
 

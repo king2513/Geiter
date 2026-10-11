@@ -114,6 +114,9 @@ learnings. Each `recent_failures[]` item also includes a stable
 - `gate_regression`: paired GEO metrics regressed or mixed.
 - `provider_or_observation`: the run or observation evidence is unusable.
 - `gate_rejected`: a gate-specific failure that does not match the above.
+The summary also returns `failure_classes`, a bounded count of recent failure
+categories, so an agent can detect repeated failure modes without replaying the
+raw learning ledger.
 
 ## Stability rules
 

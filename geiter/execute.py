@@ -782,6 +782,9 @@ def execution_history(store: GeiterStore, limit: int = 20) -> dict[str, Any]:
         for item in recent
         if not item.get("data", {}).get("accepted")
     ]
+    failure_classes: dict[str, int] = defaultdict(int)
+    for failure in recent_failures:
+        failure_classes[failure["failure_class"]] += 1
     return {
         "schema": "geiter/execution-history-v1",
         "generated_at": now_iso(),
@@ -792,6 +795,7 @@ def execution_history(store: GeiterStore, limit: int = 20) -> dict[str, Any]:
         "mean_score_delta": round(sum(deltas) / len(deltas), 4) if deltas else None,
         "recent": recent,
         "recent_failures": recent_failures,
+        "failure_classes": dict(sorted(failure_classes.items())),
         "experience": {
             "recommendation": recommend_kind(store),
             "strategy_count": effectiveness(store)["strategy_count"],
