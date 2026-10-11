@@ -77,6 +77,7 @@ TOOLS = [
                 "body": {"type": "string"},
                 "baseline_id": {"type": "string"},
                 "target": {"type": "string"},
+                "kind": {"type": "string"},
             },
         },
     },
@@ -466,6 +467,7 @@ def dispatch(store: GeiterStore, request: dict[str, Any]) -> dict[str, Any] | No
                 ),
                 baseline_id=args.get("baseline_id"),
                 target=exec_target,
+                kind=args.get("kind"),
             )
         elif name == "geiter_experience":
             from .execute import experience

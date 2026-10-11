@@ -1602,6 +1602,13 @@ class GeiterStoreTests(unittest.TestCase):
         context = self.store.context()
         self.assertIn("execution_history", context["self_assessment"])
 
+    def test_execute_contract_exposes_explicit_change_kind(self):
+        tools = dispatch(self.store, {"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+        execute_tool = next(
+            item for item in tools["result"]["tools"] if item["name"] == "geiter_execute"
+        )
+        self.assertIn("kind", execute_tool["inputSchema"]["properties"])
+
     def test_gateway_execute_runs_a_verified_cycle(self):
         self.store.init()
         self.store.add_prompt("What is Geiter?")

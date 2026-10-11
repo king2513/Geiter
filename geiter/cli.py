@@ -134,6 +134,7 @@ def parser() -> argparse.ArgumentParser:
     execute.add_argument("--body", required=True, help="Body content for the change")
     execute.add_argument("--baseline-id", help="Baseline used to judge the change")
     execute.add_argument("--target", help="Target token used for attribution")
+    execute.add_argument("--kind", help="Change strategy, such as append_section or replace_section")
     execute.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
 
     govern = commands.add_parser(
@@ -340,6 +341,7 @@ def main(argv: list[str] | None = None) -> None:
             provider_factory=surface_provider_factory(surface, target),
             baseline_id=args.baseline_id,
             target=target,
+            kind=args.kind,
         )
     elif args.command == "govern":
         target = args.target or store.read()["identity"]["name"]
