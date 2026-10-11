@@ -359,12 +359,12 @@ the mixins import those shared pieces from it without creating a cycle.
 
 ## P4 preparation
 
-P0-P3 are implemented and currently provide a durable agent-native loop:
-observe, measure, compare, gate, queue work, claim it safely, execute bounded
-changes, govern real surfaces, and learn from accepted or reverted strategies.
-The P4 preparation plan is in [docs/p4-plan.md](docs/p4-plan.md).
+P0-P3 established the durable agent-native runtime. P4 is the ecosystem phase:
+the goal is to turn Geiter into infrastructure through a general plugin
+protocol, extension discovery, lifecycle and permission contracts, a developer
+kit, and reference extension families. The preparation plan is in
+[docs/p4-plan.md](docs/p4-plan.md).
 
-P4 implementation is intentionally pending explicit authorization. The plan
-prioritizes richer retrieval evaluation and multi-provider evidence first,
-then operational storage and broader governed execution. It preserves the
-current JSON contracts, replay-first testing, and policy boundary.
+P4 implementation is intentionally pending explicit authorization. The current
+provider entry-point mechanism is treated as the seed of the broader extension
+platform, not as the finished ecosystem architecture.

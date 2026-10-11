@@ -1,228 +1,308 @@
-# P4 Preparation Plan
+# P4 Preparation Plan: Geiter Ecosystem Infrastructure
 
-Status: preparation only. P4 implementation starts only after explicit user
-authorization.
+Status: preparation only. Formal P4 implementation starts only after explicit
+user authorization.
 
-## 1. Current baseline
+## 1. Strategic correction
 
-Geiter has completed the P0-P3 foundation:
+P4 is not another round of GEO feature expansion. P4 is the ecosystem phase:
+turn Geiter from a capable agent-native project into an extensible
+infrastructure platform.
 
-- durable JSON state and append-only events
-- deterministic prompts, observations, GEO metrics, health, score, and matrix
-- provider run ledgers, bounded retries, resumable runs, and provider plugins
-- baselines, paired comparisons, regression gates, and durable gate actions
-- agent action queue with deduplication, leases, stale recovery, and
-  owner-aware claims
-- evidence-aware iteration and bounded agent bootstrap context
-- sandbox execution with snapshot/revert and a regression gate as arbiter
-- explicit surface policies and durable approval workflow
-- compounding experience that selects historically effective change kinds
-- stdio JSON-RPC/MCP-style tools and resources with stable discovery metadata
+The core should become a stable protocol and runtime. Providers, evaluators,
+surfaces, planners, storage backends, agent tools, and integrations should be
+able to evolve outside the kernel and compose through versioned contracts.
+
+The north-star question for P4 is:
+
+> Can an external developer build a useful Geiter extension, discover it,
+> install it, run it safely, and expose it to agents without modifying the
+> Geiter core?
+
+## 2. Current baseline
+
+P0-P3 already provide the foundation:
+
+- durable JSON state and append-only events;
+- deterministic prompts, observations, GEO metrics, health, score, and matrix;
+- provider run ledgers, retries, resumable runs, and a first provider
+  entry-point mechanism;
+- baselines, comparisons, regression gates, durable gate actions, and
+  owner-aware action claims;
+- evidence-aware iteration, bounded agent bootstrap context, and stable
+  capabilities discovery;
+- sandbox execution, rollback, surface policies, approval workflow, and
+  compounding experience;
+- stdio JSON-RPC/MCP-style tools and resources;
 - modular store composition while preserving `GeiterStore` as the public entry
-  point
+  point.
 
-The current release baseline is `1.26.2`. The local JSON state remains the
-source of truth, replay fixtures remain deterministic, and external mutation
-requires an explicit policy decision.
+The current release baseline is `1.26.2`. The existing plugin capability is
+intentionally narrow: `geiter.providers` can discover a provider factory
+implementing `answer(prompt) -> ProviderAnswer`. That is a useful seed, but it
+does not yet define a general extension system.
 
-## 2. P4 objective
+## 3. P4 objective
 
-P4 should make Geiter a stronger autonomous GEO research and execution
-runtime, not just a larger collection of commands. The agent should be able
-to:
+P4 establishes the Geiter Extension Platform:
 
-1. collect comparable evidence from several retrieval surfaces;
-2. evaluate answer quality beyond string mention and URL presence;
-3. explain which evidence supports a decision and how confident that decision
-   is;
-4. schedule bounded experiments across providers and surfaces;
-5. retain the current audit, replay, approval, and rollback guarantees while
-   the state volume grows.
+1. define a general plugin manifest and capability model;
+2. support multiple extension kinds, not only providers;
+3. make extensions discoverable to agents through capabilities and resources;
+4. provide lifecycle, compatibility, configuration, and failure contracts;
+5. isolate extension effects and make permissions explicit;
+6. give external developers a reliable SDK, fixtures, examples, and test kit;
+7. create the conditions for a real Geiter ecosystem without destabilizing the
+   kernel.
 
-## 3. Non-goals
+## 4. Extension model
 
-P4 does not turn Geiter into a general crawler, search engine, LLM, CMS, or
-human-facing dashboard. It does not make live network access implicit, store
-credentials in state, or bypass approval for real surfaces. It does not break
-existing `geiter/*-v1` contracts merely to simplify implementation.
+The plugin system should distinguish extension kinds by responsibility:
 
-## 4. Proposed workstreams
+- `provider`: retrieves or replays external answers;
+- `evaluator`: derives typed evidence and quality signals;
+- `surface`: reads, snapshots, applies, and restores knowledge surfaces;
+- `planner`: proposes bounded next actions or experiments;
+- `store`: supplies an alternate persistence backend;
+- `transport`: exposes Geiter through an agent protocol or host runtime;
+- `observer`: emits external events or telemetry into the audit model;
+- `command`: contributes agent-callable operations with declared side effects.
 
-### P4.1 Retrieval evaluation kernel
+An extension must not reach into private `GeiterStore` internals. It receives a
+versioned host context and communicates through declared contracts.
+
+## 5. P4 workstreams
+
+### P4.1 Extension protocol and manifest
 
 Priority: highest.
 
-Introduce composable evaluators for:
+Define a manifest that identifies:
 
-- entity disambiguation and answer claim coverage;
-- citation validity, source authority, freshness, and target attribution;
-- answer consistency across repeated probes;
-- provider-specific and cross-provider agreement;
-- confidence and evidence sufficiency separate from the north-star score.
-
-Preparation constraints:
-
-- evaluators consume normalized observation records;
-- every evaluator returns a typed result with evidence references;
-- missing or unusable evidence remains explicit;
-- existing metrics keep their meaning and remain available;
-- replay fixtures cover every evaluator before live-provider validation.
+- stable plugin ID and display name;
+- extension kind and supported API versions;
+- package/version and runtime requirements;
+- exported capabilities, tools, resources, and schemas;
+- configuration keys and secret references;
+- read/write/network/process permissions;
+- deterministic, replayable, or live behavior;
+- health checks and failure classifications.
 
 Candidate contracts:
 
 ```text
-geiter/evaluation-v1
-geiter/evidence-v1
-geiter/confidence-v1
+geiter/plugin-v1
+geiter/plugin-manifest-v1
+geiter/extension-capabilities-v1
 ```
 
-### P4.2 Multi-provider evidence orchestration
+The manifest becomes the unit of discovery. Python entry points may remain a
+transport for installation, but they must no longer be the whole contract.
+
+### P4.2 Extension registry and discovery
+
+Priority: highest.
+
+Build a registry that can discover installed extensions, validate manifests,
+resolve IDs and versions, and expose a machine-readable catalog to agents.
+
+Required surfaces:
+
+- `geiter plugins list`
+- `geiter plugins inspect <plugin-id>`
+- `geiter_plugins` gateway tool
+- `geiter://plugins` resource
+- plugin metadata inside `geiter_capabilities`
+
+Discovery must be read-only and must not import or execute extension actions
+just to list them. Invalid plugins are reported with typed diagnostics instead
+of breaking the whole runtime.
+
+Candidate contract:
+
+```text
+geiter/plugin-catalog-v1
+```
+
+### P4.3 Extension lifecycle and host SDK
+
+Priority: highest.
+
+Define the host-side lifecycle:
+
+```text
+discover -> validate -> configure -> activate -> health-check -> invoke
+        -> observe result -> deactivate
+```
+
+The SDK should provide:
+
+- typed host context;
+- namespaced configuration;
+- structured logging and event emission;
+- state/event access through approved interfaces;
+- cancellation, timeout, retry, and resume hooks;
+- dry-run and replay modes;
+- stable error and health objects.
+
+Lifecycle rules:
+
+- discovery does not imply activation;
+- activation does not imply permission to mutate;
+- every invocation has a correlation ID;
+- every external effect emits a receipt;
+- extension failure is isolated and recorded;
+- unsupported API versions fail before side effects.
+
+### P4.4 First-party extension families
 
 Priority: high.
 
-Add a provider plan that can run the same prompt set across named providers
-with independent run ledgers, rate limits, retries, and partial completion.
-The result must preserve provider identity and be comparable without treating
-one provider as ground truth.
+Use the new protocol to migrate the current provider mechanism and add
+reference implementations:
 
-Preparation constraints:
+- provider extension: current `fixture`, `jsonl`, and `http_json` behavior;
+- evaluator extension: a replayable metric/evidence evaluator;
+- surface extension: the existing sandbox surface;
+- transport extension: the existing stdio gateway;
+- store extension: a no-op or read-only reference backend for contract tests.
 
-- one provider failure cannot erase successful evidence from another;
-- live and replay providers use the same normalized answer contract;
-- credentials and endpoints remain runtime-only;
-- an orchestration run is resumable and idempotent;
-- the regression gate receives a typed provider matrix, not prose.
+The purpose is not feature volume. These reference plugins prove that the
+extension boundary can represent the capabilities Geiter already owns.
 
-Candidate contracts:
+The kernel must preserve compatibility with the current provider API during a
+deprecation window.
 
-```text
-geiter/provider-plan-v1
-geiter/orchestration-v1
-```
-
-### P4.3 Agent experiment planner
+### P4.5 Permissions, isolation, and trust
 
 Priority: high.
 
-Extend the existing action queue, baselines, experiments, and experience
-surfaces into a bounded planner. The planner should select one next experiment
-from evidence, estimate expected information gain, and record why it was
-selected.
+Plugins are executable code and must be treated as untrusted integrations.
+Define:
 
-Preparation constraints:
+- permission classes: state-read, state-write, network, filesystem, process,
+  external-publish;
+- default-deny behavior for undeclared permissions;
+- policy mapping from plugin capability to surface policy;
+- trusted, reviewed, and local-development plugin states;
+- timeout and resource limits where the host can enforce them;
+- secret references that never enter state or event payloads;
+- audit records for activation, invocation, denial, failure, and effect receipt.
 
-- planner output is a proposal until policy authorizes execution;
-- only one active change claim may own a surface/action at a time;
-- experiment completion requires evidence and a gate result;
-- failed or conflicting work becomes a durable action, never an implicit
-  retry loop;
-- planning remains deterministic when fed the same replay state.
+The first implementation may use process-level boundaries and explicit policy
+checks. Strong sandboxing can remain a later platform concern, but the
+contract must not assume that all plugins are trusted.
 
-Candidate contracts:
+### P4.6 Developer kit and ecosystem loop
 
-```text
-geiter/plan-v1
-geiter/experiment-run-v1
-```
+Priority: high.
 
-### P4.4 Durable query/storage boundary
+Ship the tools that make extension authorship practical:
 
-Priority: medium, after the evaluation contracts stabilize.
+- plugin template command;
+- minimal provider/evaluator/surface examples;
+- local manifest validator;
+- replay fixture generator;
+- contract-test helpers;
+- compatibility checker;
+- documentation for packaging and publishing;
+- a versioned extension compatibility matrix.
 
-Introduce a storage abstraction without replacing the JSON backend immediately.
-SQLite should be an optional backend for indexed history and higher query
-volume, while JSON remains the portable replay and migration format.
-
-Preparation constraints:
-
-- `GeiterStore` remains the public entry point;
-- JSON and SQLite expose the same domain records and event semantics;
-- migrations are versioned, one-way, inspectable, and reversible through export;
-- credentials and provider configuration never enter either backend;
-- the backend choice is explicit and reported in capabilities.
-
-Candidate contracts:
+Candidate commands:
 
 ```text
-geiter/storage-v1
-geiter/export-v1
+geiter plugin init
+geiter plugin validate
+geiter plugin test
+geiter plugin inspect
 ```
 
-### P4.5 Governed surface adapters
+The first successful plugin path should be short: scaffold, declare, run
+deterministic fixture tests, install locally, discover through the agent
+gateway, and invoke with an auditable result.
 
-Priority: medium, after the planner and gate contracts stabilize.
+### P4.7 Optional ecosystem registry
 
-Add adapters for real knowledge surfaces only behind the current policy model.
-The first adapter should support read, snapshot, apply, and restore with
-structured change receipts. Publishing remains an approved side effect, and
-the regression gate remains the outcome arbiter.
+Priority: later, after local discovery is stable.
 
-Preparation constraints:
+Prepare a registry format and trust model for sharing plugins. The first
+release should not require a hosted marketplace. A signed or reviewed index,
+package metadata, compatibility information, and source links are sufficient.
 
-- no implicit writes;
-- dry-run and replay mode for every adapter;
-- pre-change snapshot and post-change receipt are mandatory;
-- restore must be testable independently of the provider;
-- adapter failures are typed and resumable.
+The registry must not become a hidden runtime dependency. Offline discovery and
+local installation remain supported.
 
-## 5. Agent-facing contract requirements
+Candidate contract:
 
-Every P4 capability must be discoverable from `geiter_capabilities` and
-`geiter://capabilities` before an agent uses it. Each new surface must define:
+```text
+geiter/registry-index-v1
+```
 
-- schema name and version;
-- CLI entrypoint and gateway tool;
-- read versus write behavior;
-- idempotency key and deduplication rule;
-- retryability and resumability;
-- evidence references and failure types;
-- policy and approval boundary;
-- replay fixture format;
-- compatibility behavior for older workspaces.
+## 6. Agent-facing contract requirements
 
-The existing `context` packet must stay bounded. Large evidence belongs behind
-explicit resources or paginated tools rather than being copied into bootstrap
-context.
+Every extension capability must be discoverable before invocation:
 
-## 6. State and migration strategy
+- plugin ID, kind, version, and API compatibility;
+- exported tools and resources;
+- required configuration and secret references;
+- declared permissions and side effects;
+- deterministic/replay/live mode;
+- health state and last diagnostic;
+- invocation schema and result schema;
+- idempotency, retryability, and resumability;
+- correlation ID and evidence references.
 
-1. Keep current `geiter/v1` records readable.
-2. Add new collections only through read-time backfill and explicit doctor
-   checks.
-3. Preserve append-only events as the audit spine.
-4. Add stable references instead of duplicating full observations.
-5. Export a complete JSON snapshot before any backend migration.
-6. Require deterministic import/export round trips in tests.
+The bounded `context` packet should include only catalog summaries and urgent
+diagnostics. Full plugin manifests, schemas, and logs belong behind explicit
+resources or paginated tools.
 
-## 7. Test matrix
+## 7. Compatibility and migration
 
-Before each P4 release:
+1. Keep `GeiterStore` and all existing `geiter/*-v1` contracts stable.
+2. Treat the current `geiter.providers` entry-point group as a legacy
+   compatibility adapter during P4.
+3. Add new extension APIs beside the existing provider protocol.
+4. Validate plugin API versions before loading executable code.
+5. Preserve JSON state and append-only events as the audit spine.
+6. Backfill plugin metadata without rewriting historical observations.
+7. Make plugin activation explicit in capabilities and reports.
+8. Deprecate, but do not remove, the old provider factory contract until a
+   documented migration path and compatibility tests exist.
 
-- unit tests for evaluator directionality and insufficient-data behavior;
-- replay fixtures for every provider/evaluator combination;
-- partial provider failure, retry, resume, and idempotency tests;
-- concurrent agent claims and surface-write conflict tests;
-- policy, approval, deny, rollback, and stale-work recovery tests;
-- JSON contract tests for CLI, gateway tools, and resources;
-- old-workspace backfill and migration round-trip tests;
+## 8. Test and release matrix
+
+Every P4 extension release must cover:
+
+- manifest parsing, schema validation, and version negotiation;
+- discovery without activation;
+- invalid, missing, and conflicting plugins;
+- permission denial before side effects;
+- timeout, retry, cancellation, resume, and idempotency;
+- plugin failure isolation and audit records;
+- deterministic replay fixtures;
+- old provider plugin compatibility;
+- CLI, gateway tool, and resource contracts;
+- concurrent activation and action ownership;
 - wheel build, installed CLI smoke test, syntax check, and `git diff --check`.
 
-Live-provider tests remain opt-in and isolated from deterministic CI.
+Reference plugins should be tested in-process. Isolation and permission tests
+should also cover a subprocess boundary where supported.
 
-## 8. Release sequence
+## 9. Proposed release order
 
-The proposed order is:
+1. `P4.1`: manifest, extension kinds, API versioning, and catalog schemas.
+2. `P4.2`: registry/discovery surfaces and plugin diagnostics.
+3. `P4.3`: host SDK, lifecycle, permissions, and invocation receipts.
+4. `P4.4`: migrate providers and ship reference evaluator/surface/transport
+   extensions.
+5. `P4.5`: developer kit, template, validator, fixture tools, and compatibility
+   suite.
+6. `P4.6`: optional external registry/index format.
 
-1. P4.1 evaluation contracts and replay fixtures.
-2. P4.2 multi-provider orchestration.
-3. P4.3 experiment planner integration.
-4. P4.4 optional SQLite backend and export/import.
-5. P4.5 governed surface adapters.
+Each increment must include capability metadata, contract tests, migration notes,
+and a working example that an agent can discover and invoke.
 
-Each step should ship as a narrow versioned increment with a changelog entry,
-capability metadata, contract tests, and a migration note when state changes.
+## 10. Authorization boundary
 
-## 9. Authorization boundary
-
-This document records preparation only. No P4 workstream is authorized for
-formal implementation until the user explicitly gives the start signal.
+This document is preparation only. No P4 implementation is authorized until
+the user explicitly gives the start signal.
