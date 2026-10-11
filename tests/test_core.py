@@ -958,6 +958,25 @@ class GeiterStoreTests(unittest.TestCase):
         self.assertEqual(result["opportunities"][0]["opportunity"], "improve_provider")
         self.assertEqual(result["opportunities"][0]["evidence"]["provider"], "surface")
 
+    def test_global_score_names_the_weakest_provider(self):
+        self.store.init()
+        prompts = [
+            self.store.add_prompt("What is Geiter?", "discovery"),
+            self.store.add_prompt("Why use Geiter?", "evaluation"),
+        ]
+        for prompt in prompts:
+            self.store.record_observation(
+                prompt["id"], "fixture", "Geiter is useful.", ["https://geiter.dev/docs"]
+            )
+            self.store.record_observation(
+                prompt["id"], "surface", "Geiter is mentioned.", []
+            )
+
+        score = self.store.score()
+
+        self.assertEqual(score["weakest_provider"], "surface")
+        self.assertIn("provider 'surface'", score["next_action"])
+
     def test_observation_metrics_and_analysis(self):
         self.store.init()
         prompt = self.store.add_prompt("What is Geiter?", "discovery")

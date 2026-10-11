@@ -94,6 +94,41 @@ class AnalysisMixin:
             )
         ranked = sorted(scored, key=lambda item: (item["value"], -item["weight"]))
         weakest_dimension = ranked[0]["name"] if ranked else None
+        weakest_provider = None
+        weakest_provider_score = None
+        if provider is None:
+            state = self.read()
+            providers = sorted({
+                item["data"].get("provider")
+                for item in state["observations"]
+                if item["kind"] == "retrieval.observation"
+                and item["data"].get("provider")
+            })
+            scoped_scores = [
+                self.score(name)
+                for name in providers
+            ]
+            scored_scopes = [
+                item for item in scoped_scores if item.get("status") == "scored"
+            ]
+            if scored_scopes:
+                weakest_provider_score = min(
+                    scored_scopes,
+                    key=lambda item: item["north_star"],
+                )
+                weakest_provider = weakest_provider_score.get("provider")
+        next_action = (
+            (
+                f"Improve provider '{weakest_provider}' at "
+                f"{weakest_provider_score['north_star']} before expanding coverage."
+            )
+            if weakest_provider_score is not None
+            else (
+                f"Improve the weakest dimension '{weakest_dimension}' before expanding coverage."
+                if weakest_dimension and sufficient
+                else "Collect more usable observations before trusting a north-star score."
+            )
+        )
         return {
             "schema": "geiter/score-v1",
             "generated_at": now(),
@@ -104,11 +139,8 @@ class AnalysisMixin:
             "dimensions": dimensions,
             "weakest_dimension": weakest_dimension,
             "provider": provider,
-            "next_action": (
-                f"Improve the weakest dimension '{weakest_dimension}' before expanding coverage."
-                if weakest_dimension and sufficient
-                else "Collect more usable observations before trusting a north-star score."
-            ),
+            "weakest_provider": weakest_provider,
+            "next_action": next_action,
         }
 
     def introspect(self) -> dict[str, Any]:
